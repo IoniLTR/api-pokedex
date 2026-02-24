@@ -40,10 +40,13 @@ async function createPokemon(payload) {
     ? typesRaw.map(normalizeType)
     : [normalizeType(typesRaw)];
 
+  // NOUVEAU : On ajoute height et weight
   const pkmn = await Pokemon.create({
     name,
     imgUrl,
     description: String(payload.description || ""),
+    height: payload.height ? Number(payload.height) : undefined,
+    weight: payload.weight ? Number(payload.weight) : undefined,
     types,
     regions: []
   });
@@ -179,6 +182,10 @@ async function updatePokemon({ id, patch }) {
   if (patch.name !== undefined) updates.name = String(patch.name).trim();
   if (patch.imgUrl !== undefined) updates.imgUrl = String(patch.imgUrl).trim();
   if (patch.description !== undefined) updates.description = String(patch.description);
+  
+  // NOUVEAU : Mise à jour de la taille et du poids
+  if (patch.height !== undefined) updates.height = Number(patch.height);
+  if (patch.weight !== undefined) updates.weight = Number(patch.weight);
 
   if (patch.types !== undefined) {
     const raw = patch.types;

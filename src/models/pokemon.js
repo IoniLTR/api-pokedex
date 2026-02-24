@@ -14,6 +14,8 @@ const pokemonSchema = new mongoose.Schema(
     name: { type: String, required: true, unique: true, trim: true },
     imgUrl: { type: String, required: true, trim: true },
     description: { type: String, default: "" },
+    height: { type: Number }, // Ajout de la taille (en mètres)
+    weight: { type: Number }, // Ajout du poids (en kg)
     types: {
       type: [String],
       validate: {
