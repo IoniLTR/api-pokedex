@@ -70,4 +70,17 @@ async function removeRegion(req, res, next) {
   }
 }
 
-module.exports = { create, addRegion, search, getOne, remove, update, removeRegion };
+async function syncCry(req, res, next) {
+  try {
+    const p = await svc.syncPokemonCry({
+      pkmnID: req.body?.pkmnID || req.query?.pkmnID,
+      name: req.body?.name || req.query?.name,
+      force: req.body?.force ?? req.query?.force
+    });
+    return res.status(200).json(p);
+  } catch (e) {
+    next(e);
+  }
+}
+
+module.exports = { create, addRegion, search, getOne, remove, update, removeRegion, syncCry };

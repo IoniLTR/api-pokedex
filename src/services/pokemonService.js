@@ -1,8 +1,20 @@
 const mongoose = require("mongoose");
 const Pokemon = require("../models/pokemon");
+const { resolveRegionImageUrl, resolveRegionName } = require("../utils/regionImages");
+const { fetchPokemonCryUrlFromPokepedia } = require("../utils/pokepediaCry");
 
 function normalizeType(t) {
   return String(t || "").toUpperCase().trim();
+}
+
+function toBoolean(value) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase();
+  return normalized === "true" || normalized === "1" || normalized === "yes" || normalized === "on";
 }
 
 function assertObjectId(id, fieldName = "id") {
@@ -11,6 +23,32 @@ function assertObjectId(id, fieldName = "id") {
     err.statusCode = 400;
     throw err;
   }
+}
+
+function enrichRegions(regions) {
+  if (!Array.isArray(regions)) return [];
+
+  return regions.map((region) => {
+    const base = region?.toObject ? region.toObject() : region;
+    const resolvedName = resolveRegionName(base?.regionName, base?.regionPokedexNumber);
+    const imageUrl =
+      String(base?.regionImageUrl || "").trim() ||
+      resolveRegionImageUrl(resolvedName, base?.regionPokedexNumber);
+    return {
+      ...base,
+      regionName: resolvedName || base?.regionName,
+      regionImageUrl: imageUrl
+    };
+  });
+}
+
+function enrichPokemon(pokemon) {
+  if (!pokemon) return pokemon;
+  const base = pokemon?.toObject ? pokemon.toObject() : pokemon;
+  return {
+    ...base,
+    regions: enrichRegions(base.regions)
+  };
 }
 
 async function createPokemon(payload) {
@@ -40,10 +78,17 @@ async function createPokemon(payload) {
     ? typesRaw.map(normalizeType)
     : [normalizeType(typesRaw)];
 
+  const manualCryUrl = String(payload.cryUrl || "").trim();
+  let resolvedCryUrl = manualCryUrl;
+  if (!resolvedCryUrl) {
+    resolvedCryUrl = await fetchPokemonCryUrlFromPokepedia(name);
+  }
+
   // NOUVEAU : On ajoute height et weight
   const pkmn = await Pokemon.create({
     name,
     imgUrl,
+    cryUrl: resolvedCryUrl,
     description: String(payload.description || ""),
     height: payload.height ? Number(payload.height) : undefined,
     weight: payload.weight ? Number(payload.weight) : undefined,
@@ -51,7 +96,7 @@ async function createPokemon(payload) {
     regions: []
   });
 
-  return pkmn;
+  return enrichPokemon(pkmn);
 }
 
 async function addRegion({ pkmnID, regionName, regionPokedexNumber }) {
@@ -84,18 +129,28 @@ async function addRegion({ pkmnID, regionName, regionPokedexNumber }) {
     throw err;
   }
 
-  const idx = pkmn.regions.findIndex(
-    (r) => r.regionName.toLowerCase() === rn.toLowerCase()
-  );
+  const resolvedName = resolveRegionName(rn, num) || rn;
+  const resolvedImageUrl = resolveRegionImageUrl(resolvedName, num);
+
+  const idx = pkmn.regions.findIndex((r) => {
+    const current = String(r.regionName || "").toLowerCase();
+    return current === rn.toLowerCase() || current === resolvedName.toLowerCase();
+  });
 
   if (idx >= 0) {
+    pkmn.regions[idx].regionName = resolvedName;
     pkmn.regions[idx].regionPokedexNumber = num; // update si existe
+    pkmn.regions[idx].regionImageUrl = resolvedImageUrl;
   } else {
-    pkmn.regions.push({ regionName: rn, regionPokedexNumber: num });
+    pkmn.regions.push({
+      regionName: resolvedName,
+      regionPokedexNumber: num,
+      regionImageUrl: resolvedImageUrl
+    });
   }
 
   await pkmn.save();
-  return pkmn;
+  return enrichPokemon(pkmn);
 }
 
 async function searchPokemons({ page = 1, size = 20, typeOne, typeTwo, partialName }) {
@@ -120,7 +175,7 @@ async function searchPokemons({ page = 1, size = 20, typeOne, typeTwo, partialNa
     Pokemon.countDocuments(filter)
   ]);
 
-  return { data, count, page: p, size: s };
+  return { data: data.map(enrichPokemon), count, page: p, size: s };
 }
 
 async function getOne({ id, name }) {
@@ -133,7 +188,7 @@ async function getOne({ id, name }) {
       err.statusCode = 404;
       throw err;
     }
-    return p;
+    return enrichPokemon(p);
   }
 
   if (name) {
@@ -143,7 +198,7 @@ async function getOne({ id, name }) {
       err.statusCode = 404;
       throw err;
     }
-    return p;
+    return enrichPokemon(p);
   }
 
   const err = new Error("Fournir id ou name");
@@ -177,10 +232,18 @@ async function updatePokemon({ id, patch }) {
 
   assertObjectId(id, "id");
 
+  const current = await Pokemon.findById(id);
+  if (!current) {
+    const err = new Error("Pokemon introuvable");
+    err.statusCode = 404;
+    throw err;
+  }
+
   const updates = {};
 
   if (patch.name !== undefined) updates.name = String(patch.name).trim();
   if (patch.imgUrl !== undefined) updates.imgUrl = String(patch.imgUrl).trim();
+  if (patch.cryUrl !== undefined) updates.cryUrl = String(patch.cryUrl).trim();
   if (patch.description !== undefined) updates.description = String(patch.description);
   
   // NOUVEAU : Mise à jour de la taille et du poids
@@ -193,18 +256,19 @@ async function updatePokemon({ id, patch }) {
     updates.types = types;
   }
 
+  const hasCryUrlPatch = patch.cryUrl !== undefined;
+  const nextName = updates.name || current.name;
+  const currentCryUrl = String(current.cryUrl || "").trim();
+  if (!hasCryUrlPatch && patch.name !== undefined && !currentCryUrl) {
+    updates.cryUrl = await fetchPokemonCryUrlFromPokepedia(nextName);
+  }
+
   const p = await Pokemon.findByIdAndUpdate(id, updates, {
     new: true,
     runValidators: true
   });
 
-  if (!p) {
-    const err = new Error("Pokemon introuvable");
-    err.statusCode = 404;
-    throw err;
-  }
-
-  return p;
+  return enrichPokemon(p);
 }
 
 async function removeRegion({ pkmnID, regionName }) {
@@ -238,6 +302,43 @@ async function removeRegion({ pkmnID, regionName }) {
   await p.save();
 }
 
+async function syncPokemonCry({ pkmnID, name, force = false }) {
+  let pokemon = null;
+
+  if (pkmnID) {
+    assertObjectId(pkmnID, "pkmnID");
+    pokemon = await Pokemon.findById(pkmnID);
+  } else if (name) {
+    pokemon = await Pokemon.findOne({ name: String(name).trim() });
+  } else {
+    const err = new Error("pkmnID ou name requis");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  if (!pokemon) {
+    const err = new Error("Pokemon introuvable");
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const hasExistingCry = Boolean(String(pokemon.cryUrl || "").trim());
+  if (hasExistingCry && !toBoolean(force)) {
+    return enrichPokemon(pokemon);
+  }
+
+  const cryUrl = await fetchPokemonCryUrlFromPokepedia(pokemon.name);
+  if (cryUrl) {
+    pokemon.cryUrl = cryUrl;
+    await pokemon.save();
+  } else if (!hasExistingCry) {
+    pokemon.cryUrl = "";
+    await pokemon.save();
+  }
+
+  return enrichPokemon(pokemon);
+}
+
 module.exports = {
   createPokemon,
   addRegion,
@@ -245,5 +346,6 @@ module.exports = {
   getOne,
   deletePokemon,
   updatePokemon,
-  removeRegion
+  removeRegion,
+  syncPokemonCry
 };

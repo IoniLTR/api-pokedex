@@ -34,6 +34,9 @@ swaggerSpec.paths = {
     post: { summary: "Add region (ADMIN)", security: [{ bearerAuth: [] }], responses: { 200: { description: "OK" } } },
     delete: { summary: "Remove region (ADMIN)", security: [{ bearerAuth: [] }], responses: { 204: { description: "No Content" } } }
   },
+  "/api/pkmn/cry": {
+    post: { summary: "Sync pokemon cry from Pokepedia (ADMIN)", security: [{ bearerAuth: [] }], responses: { 200: { description: "OK" } } }
+  },
 
   "/api/trainer": {
     post: { summary: "Create my trainer", security: [{ bearerAuth: [] }], responses: { 201: { description: "Created" } } },

@@ -35,4 +35,7 @@ router.put("/", auth, permission("ADMIN"), upload.none(), ctrl.update);
 // Remove region (ADMIN requis)
 router.delete("/region", auth, permission("ADMIN"), ctrl.removeRegion);
 
+// Sync cry from Pokepedia and persist in MongoDB (ADMIN requis)
+router.post("/cry", auth, permission("ADMIN"), upload.none(), ctrl.syncCry);
+
 module.exports = router;
