@@ -7,7 +7,8 @@
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
     "test": "jest --runInBand",
-    "sync:cries": "node src/scripts/syncPokemonCries.js"
+    "sync:cries": "node src/scripts/syncPokemonCries.js",
+    "seed:pokeapi": "node src/scripts/seedFromPokeApi.js"
   },
   "dependencies": {
     "bcrypt": "^5.1.1",

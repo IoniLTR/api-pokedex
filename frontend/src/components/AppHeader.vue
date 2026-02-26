@@ -63,7 +63,7 @@ const handleSearchButtonClick = async () => {
     await focusSearchInput()
     return
   }
-  await applySearch()
+  isSearchOpen.value = false
 }
 
 const handleSearchSubmit = async () => {

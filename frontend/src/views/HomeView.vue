@@ -15,8 +15,10 @@ const selectedRegionFilter = ref('ALL')
 const showFavoritesOnly = ref(false)
 const sortFilter = ref('DEFAULT')
 const favoriteIds = ref(new Set())
+const favoriteLaunchIds = ref(new Set())
 const favoriteShakeIds = ref(new Set())
 const favoriteRevealIds = ref(new Set())
+const favoriteHiddenIds = ref(new Set())
 const favoriteBurstIds = ref(new Set())
 const favoriteConcealIds = ref(new Set())
 const selectedPokemon = ref(null)
@@ -35,10 +37,13 @@ let favoriteReleaseSfx = null
 
 const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000'
 const FAVORITES_STORAGE_KEY = 'pokedex.favoriteIds'
-const FAVORITE_SHAKE_MS = 2200
-const FAVORITE_REVEAL_MS = 420
+const FAVORITE_LAUNCH_MS = 1000
+const FAVORITE_REVEAL_DELAY_MS = 600
+const FAVORITE_SHAKE_MS = 1950
+const FAVORITE_REVEAL_MS = 400
 const FAVORITE_BURST_MS = 700
 const FAVORITE_CONCEAL_MS = 520
+const SEARCH_PAGE_SIZE = 100
 const favoriteCaptureTimers = new Map()
 
 const TYPE_COLORS = {
@@ -138,6 +143,18 @@ const ENERGY_ICON_SPRITES = {
   NORMAL: { id: 'energy-normal', viewBox: '0 0 206 232' }
 }
 
+const BASE_STAT_ORDER = [
+  { key: 'hp', label: 'HP' },
+  { key: 'attack', label: 'ATK' },
+  { key: 'defense', label: 'DEF' },
+  { key: 'specialAttack', label: 'ATK SPE' },
+  { key: 'specialDefense', label: 'DEF SPE' },
+  { key: 'speed', label: 'VIT' }
+]
+const MAX_BASE_STAT_VISUAL = 180
+const DETAIL_SECTION_KEYS = ['PROFILE', 'ABILITIES', 'STATS', 'ORIGIN']
+const activeDetailSection = ref('PROFILE')
+
 const normalizeToken = (value) =>
   String(value || '')
     .trim()
@@ -152,14 +169,35 @@ const fetchPokemons = async () => {
   error.value = null
 
   try {
-    const response = await fetch(`${apiBaseUrl}/api/pkmn/search`)
+    let page = 1
+    let keepGoing = true
+    const allPokemons = []
 
-    if (!response.ok) {
-      throw new Error('Erreur lors de la recuperation des pokemon')
+    while (keepGoing) {
+      const response = await fetch(
+        `${apiBaseUrl}/api/pkmn/search?page=${page}&size=${SEARCH_PAGE_SIZE}`
+      )
+
+      if (!response.ok) {
+        throw new Error('Erreur lors de la recuperation des pokemon')
+      }
+
+      const payload = await response.json()
+      const pageData = Array.isArray(payload?.data) ? payload.data : []
+      allPokemons.push(...pageData)
+
+      const totalCount = Number(payload?.count)
+      const reachedEndByCount = Number.isFinite(totalCount) && allPokemons.length >= totalCount
+      const reachedEndByPage = pageData.length < SEARCH_PAGE_SIZE
+
+      if (reachedEndByCount || reachedEndByPage) {
+        keepGoing = false
+      } else {
+        page += 1
+      }
     }
 
-    const payload = await response.json()
-    pokemons.value = Array.isArray(payload?.data) ? payload.data : []
+    pokemons.value = allPokemons
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Erreur inconnue'
     pokemons.value = []
@@ -301,14 +339,101 @@ const getEnergyIconId = (pokemon) => getEnergyIconSprite(pokemon).id
 const getEnergyIconViewBox = (pokemon) => getEnergyIconSprite(pokemon).viewBox
 
 const getTypeLabel = (type) => TYPE_LABELS_FR[type] || type || 'INCONNU'
+const formatSlugLabel = (value) => {
+  const text = String(value || '')
+    .trim()
+    .replace(/[_-]+/g, ' ')
+  return text
+    ? text.replace(/\b\w/g, (char) => char.toUpperCase())
+    : '-'
+}
 
 const getPokedexNumber = (pokemon) => {
-  const raw = pokemon?.regions?.[0]?.regionPokedexNumber
+  const raw = pokemon?.nationalDexNumber ?? pokemon?.regions?.[0]?.regionPokedexNumber
   const value = Number(raw)
   return Number.isFinite(value) ? value : null
 }
 
 const getRegionName = (pokemon) => String(pokemon?.regions?.[0]?.regionName || 'REGION')
+const getDisplayName = (pokemon) => String(pokemon?.displayName || pokemon?.name || '').trim()
+const formatDexNumber = (pokemon) => {
+  const dex = getPokedexNumber(pokemon)
+  return dex ? `#${String(dex).padStart(4, '0')}` : '-'
+}
+const getSecondaryTypes = (pokemon) => {
+  const types = Array.isArray(pokemon?.types) ? pokemon.types : []
+  return types.slice(1).map((type) => {
+    const normalized = normalizeType(type)
+    return TYPE_ALIASES[normalized] || normalized
+  })
+}
+const getAbilityList = (pokemon) => {
+  const abilities = Array.isArray(pokemon?.abilities) ? pokemon.abilities : []
+  return abilities
+    .slice()
+    .sort((a, b) => Number(a?.slot || 0) - Number(b?.slot || 0))
+    .map((ability) => ({
+      name: formatSlugLabel(ability?.name),
+      isHidden: Boolean(ability?.isHidden)
+    }))
+    .filter((ability) => ability.name && ability.name !== '-')
+}
+const getEggGroupLabel = (pokemon) => {
+  const groups = Array.isArray(pokemon?.eggGroups) ? pokemon.eggGroups : []
+  if (!groups.length) return '-'
+  return groups.map((group) => formatSlugLabel(group)).join(' / ')
+}
+const getMetaFlags = (pokemon) => {
+  const flags = []
+  if (pokemon?.isLegendary) flags.push('LEGENDAIRE')
+  if (pokemon?.isMythical) flags.push('MYTHIQUE')
+  if (pokemon?.isBaby) flags.push('BEBE')
+  return flags.length ? flags : ['STANDARD']
+}
+const getGenderRatio = (pokemon) => {
+  const value = Number(pokemon?.genderRate)
+  if (!Number.isFinite(value)) return '-'
+  if (value < 0) return 'Asexue'
+  const femalePercent = Math.round((value / 8) * 100)
+  const malePercent = 100 - femalePercent
+  return `${malePercent}% M / ${femalePercent}% F`
+}
+const getCaptureRate = (pokemon) => {
+  const value = Number(pokemon?.captureRate)
+  return Number.isFinite(value) ? `${value}/255` : '-'
+}
+const getBaseStats = (pokemon) => {
+  const base = pokemon?.baseStats && typeof pokemon.baseStats === 'object' ? pokemon.baseStats : {}
+  const toSafe = (key) => {
+    const value = Number(base?.[key])
+    return Number.isFinite(value) ? value : 0
+  }
+  const hp = toSafe('hp')
+  const attack = toSafe('attack')
+  const defense = toSafe('defense')
+  const specialAttack = toSafe('specialAttack')
+  const specialDefense = toSafe('specialDefense')
+  const speed = toSafe('speed')
+  const totalRaw = Number(base?.total)
+  const total =
+    Number.isFinite(totalRaw) && totalRaw > 0
+      ? totalRaw
+      : hp + attack + defense + specialAttack + specialDefense + speed
+  return { hp, attack, defense, specialAttack, specialDefense, speed, total }
+}
+const getBaseStatEntries = (pokemon) => {
+  const stats = getBaseStats(pokemon)
+  return BASE_STAT_ORDER.map((item) => ({
+    key: item.key,
+    label: item.label,
+    value: Number(stats[item.key]) || 0
+  }))
+}
+const getStatPercent = (value) => {
+  const num = Number(value)
+  if (!Number.isFinite(num) || num <= 0) return 0
+  return Math.max(0, Math.min(100, (num / MAX_BASE_STAT_VISUAL) * 100))
+}
 
 const getOfficialArtworkUrl = (dexNumber) =>
   `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${dexNumber}.png`
@@ -694,7 +819,24 @@ const getRegionImageUrl = (pokemon) => {
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`
 }
 
-const toggleFavorite = (id) => {
+const setFavoriteLaunchVector = (triggerElement) => {
+  if (!(triggerElement instanceof HTMLElement)) return
+
+  const card = triggerElement.closest('.pokemon-card')
+  const detailHero = triggerElement.closest('.detail-hero')
+  const targetImage = card?.querySelector('.pokemon-image') || detailHero?.querySelector('.detail-hero-image')
+  if (!(targetImage instanceof HTMLElement)) return
+
+  const ballRect = triggerElement.getBoundingClientRect()
+  const imageRect = targetImage.getBoundingClientRect()
+  const launchX = imageRect.left + imageRect.width / 2 - (ballRect.left + ballRect.width / 2)
+  const launchY = imageRect.top + imageRect.height / 2 - (ballRect.top + ballRect.height / 2)
+
+  triggerElement.style.setProperty('--favorite-catch-x', `${launchX.toFixed(1)}px`)
+  triggerElement.style.setProperty('--favorite-catch-y', `${launchY.toFixed(1)}px`)
+}
+
+const toggleFavorite = (id, event) => {
   if (!id) return
   const normalizedId = String(id)
   if (isFavoriteAnimating(normalizedId)) return
@@ -703,20 +845,22 @@ const toggleFavorite = (id) => {
   if (next.has(normalizedId)) {
     startFavoriteRelease(normalizedId)
   } else {
-    startFavoriteCapture(normalizedId)
+    startFavoriteCapture(normalizedId, event?.currentTarget)
   }
 }
 
 const isFavorite = (id) => Boolean(id) && favoriteIds.value.has(String(id))
+const isFavoriteLaunching = (id) => Boolean(id) && favoriteLaunchIds.value.has(String(id))
 const isFavoriteShaking = (id) => Boolean(id) && favoriteShakeIds.value.has(String(id))
 const isFavoriteRevealing = (id) => Boolean(id) && favoriteRevealIds.value.has(String(id))
+const isFavoriteHidden = (id) => Boolean(id) && favoriteHiddenIds.value.has(String(id))
 const isFavoriteBursting = (id) => Boolean(id) && favoriteBurstIds.value.has(String(id))
 const isFavoriteConcealing = (id) => Boolean(id) && favoriteConcealIds.value.has(String(id))
 const isFavoriteCapturing = (id) =>
-  isFavoriteShaking(id) || isFavoriteRevealing(id) || isFavoriteBursting(id)
+  isFavoriteLaunching(id) || isFavoriteShaking(id) || isFavoriteRevealing(id) || isFavoriteBursting(id)
 const isFavoriteAnimating = (id) => isFavoriteCapturing(id) || isFavoriteConcealing(id)
 const isFavoriteBallClosed = (id) => isFavorite(id) || isFavoriteAnimating(id)
-const shouldUseSilhouette = (id) => !isFavorite(id) && !isFavoriteRevealing(id)
+const shouldUseSilhouette = (id) => !isFavorite(id)
 
 const updateAnimatedSet = (setRef, id, shouldAdd) => {
   const normalizedId = String(id)
@@ -743,40 +887,54 @@ const clearFavoriteCapture = (id) => {
     window.clearTimeout(timerId)
   }
   favoriteCaptureTimers.delete(normalizedId)
+  updateAnimatedSet(favoriteLaunchIds, normalizedId, false)
   updateAnimatedSet(favoriteShakeIds, normalizedId, false)
   updateAnimatedSet(favoriteRevealIds, normalizedId, false)
+  updateAnimatedSet(favoriteHiddenIds, normalizedId, false)
   updateAnimatedSet(favoriteBurstIds, normalizedId, false)
   updateAnimatedSet(favoriteConcealIds, normalizedId, false)
 }
 
-const startFavoriteCapture = (id) => {
+const startFavoriteCapture = (id, triggerElement = null) => {
   const normalizedId = String(id)
   clearFavoriteCapture(normalizedId)
+  setFavoriteLaunchVector(triggerElement)
   playFavoriteSfx('capture')
-  updateAnimatedSet(favoriteShakeIds, normalizedId, true)
+  updateAnimatedSet(favoriteLaunchIds, normalizedId, true)
 
-  const shakeTimer = window.setTimeout(() => {
-    updateAnimatedSet(favoriteShakeIds, normalizedId, false)
+  const revealStartTimer = window.setTimeout(() => {
     updateAnimatedSet(favoriteRevealIds, normalizedId, true)
-    updateAnimatedSet(favoriteBurstIds, normalizedId, true)
+  }, FAVORITE_REVEAL_DELAY_MS)
+  registerFavoriteTimer(normalizedId, revealStartTimer)
 
-    const revealTimer = window.setTimeout(() => {
+  const revealCompleteTimer = window.setTimeout(() => {
+    updateAnimatedSet(favoriteHiddenIds, normalizedId, true)
+    updateAnimatedSet(favoriteRevealIds, normalizedId, false)
+  }, FAVORITE_REVEAL_DELAY_MS + FAVORITE_REVEAL_MS)
+  registerFavoriteTimer(normalizedId, revealCompleteTimer)
+
+  const launchTimer = window.setTimeout(() => {
+    updateAnimatedSet(favoriteLaunchIds, normalizedId, false)
+    updateAnimatedSet(favoriteShakeIds, normalizedId, true)
+
+    const shakeTimer = window.setTimeout(() => {
+      updateAnimatedSet(favoriteShakeIds, normalizedId, false)
       const next = new Set(favoriteIds.value)
       next.add(normalizedId)
       favoriteIds.value = next
       persistFavoriteIds()
-      updateAnimatedSet(favoriteRevealIds, normalizedId, false)
-    }, FAVORITE_REVEAL_MS)
-    registerFavoriteTimer(normalizedId, revealTimer)
+      updateAnimatedSet(favoriteHiddenIds, normalizedId, false)
+      updateAnimatedSet(favoriteBurstIds, normalizedId, true)
 
-    const burstTimer = window.setTimeout(() => {
-      updateAnimatedSet(favoriteBurstIds, normalizedId, false)
-      favoriteCaptureTimers.delete(normalizedId)
-    }, FAVORITE_BURST_MS)
-    registerFavoriteTimer(normalizedId, burstTimer)
-  }, FAVORITE_SHAKE_MS)
-
-  registerFavoriteTimer(normalizedId, shakeTimer)
+      const burstTimer = window.setTimeout(() => {
+        updateAnimatedSet(favoriteBurstIds, normalizedId, false)
+        favoriteCaptureTimers.delete(normalizedId)
+      }, FAVORITE_BURST_MS)
+      registerFavoriteTimer(normalizedId, burstTimer)
+    }, FAVORITE_SHAKE_MS)
+    registerFavoriteTimer(normalizedId, shakeTimer)
+  }, FAVORITE_LAUNCH_MS)
+  registerFavoriteTimer(normalizedId, launchTimer)
 }
 
 const startFavoriteRelease = (id) => {
@@ -870,6 +1028,7 @@ watch(
     if (previousId !== nextId) {
       stopCryPlayback()
       stopDescriptionPlayback()
+      activeDetailSection.value = DETAIL_SECTION_KEYS[0]
     }
 
     if (!pokemon) {
@@ -950,6 +1109,10 @@ watch(
           <circle cx="30" cy="30.5" r="7.2" fill="#ffffff" stroke="#111111" stroke-width="2"/>
           <circle cx="30" cy="30.5" r="3.1" fill="#111111"/>
         </symbol>
+        <symbol id="icon-pokeball-bg" viewBox="0 0 162 162">
+          <path d="M50.5977 85.4453C52.7241 100.309 65.5053 111.735 80.957 111.735C96.4091 111.735 109.191 100.309 111.317 85.4453H161.452C159.067 127.953 123.843 161.688 80.7383 161.688C37.6338 161.688 2.41053 127.953 0.0253906 85.4453H50.5977ZM80.7383 0C123.991 0 159.311 33.9671 161.478 76.6816H111.317C109.191 61.8173 96.4093 50.3906 80.957 50.3906C65.5051 50.391 52.7239 61.8176 50.5977 76.6816H0C2.16635 33.9672 37.4855 0.000197082 80.7383 0Z" fill="white" fill-opacity="0.3"/>
+          <circle cx="80.9579" cy="81.0632" r="15.3363" fill="white" fill-opacity="0.3"/>
+        </symbol>
       </defs>
     </svg>
 
@@ -972,6 +1135,18 @@ watch(
           @keydown.space.prevent="openDetails(pokemon)"
         >
           <svg
+            v-if="!isFavorite(pokemon._id)"
+            class="pokeball-mark"
+            viewBox="0 0 162 162"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+            aria-hidden="true"
+          >
+            <use href="#icon-pokeball-bg" />
+          </svg>
+
+          <svg
+            v-if="isFavorite(pokemon._id)"
             class="energy-mark"
             :viewBox="getEnergyIconViewBox(pokemon)"
             fill="none"
@@ -982,19 +1157,20 @@ watch(
           </svg>
 
           <h2 class="pokemon-name">
-            {{ formatPokemonDisplayName(pokemon.name, 'INCONNU') }}
+            {{ formatPokemonDisplayName(getDisplayName(pokemon), 'INCONNU') }}
           </h2>
 
           <button
             class="favorite-btn"
             :class="{
               active: isFavorite(pokemon._id),
+              'is-launching': isFavoriteLaunching(pokemon._id),
               'is-catching': isFavoriteShaking(pokemon._id),
               'is-bursting': isFavoriteBursting(pokemon._id),
               'is-releasing': isFavoriteConcealing(pokemon._id)
             }"
             type="button"
-            @click.stop="toggleFavorite(pokemon._id)"
+            @click.stop="toggleFavorite(pokemon._id, $event)"
             :aria-label="
               isFavoriteAnimating(pokemon._id)
                 ? 'Animation en cours'
@@ -1035,10 +1211,11 @@ watch(
             class="pokemon-image"
             :class="{
               silhouette: shouldUseSilhouette(pokemon._id),
-              revealing: isFavoriteRevealing(pokemon._id)
+              revealing: isFavoriteRevealing(pokemon._id),
+              'capture-hidden': isFavoriteHidden(pokemon._id)
             }"
             :src="pokemon.imgUrl"
-            :alt="pokemon.name || 'Pokemon'"
+            :alt="getDisplayName(pokemon) || 'Pokemon'"
             loading="lazy"
             decoding="async"
           />
@@ -1067,18 +1244,21 @@ watch(
                 ×
               </button>
 
-              <h3 class="detail-title">{{ formatPokemonDisplayName(selectedPokemon.name, 'INCONNU') }}</h3>
+              <h3 class="detail-title">
+                {{ formatPokemonDisplayName(getDisplayName(selectedPokemon), 'INCONNU') }}
+              </h3>
 
               <button
                 class="detail-ball-toggle"
                 :class="{
                   active: isFavorite(selectedPokemon?._id),
+                  'is-launching': isFavoriteLaunching(selectedPokemon?._id),
                   'is-catching': isFavoriteShaking(selectedPokemon?._id),
                   'is-bursting': isFavoriteBursting(selectedPokemon?._id),
                   'is-releasing': isFavoriteConcealing(selectedPokemon?._id)
                 }"
                 type="button"
-                @click="toggleFavorite(selectedPokemon?._id)"
+                @click="toggleFavorite(selectedPokemon?._id, $event)"
                 :aria-label="
                   isFavoriteAnimating(selectedPokemon?._id)
                     ? 'Animation en cours'
@@ -1131,19 +1311,37 @@ watch(
               </svg>
             </button>
 
-            <svg class="detail-hero-mark" viewBox="0 0 162 162" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-              <path d="M50.5977 85.4453C52.7241 100.309 65.5053 111.735 80.957 111.735C96.4091 111.735 109.191 100.309 111.317 85.4453H161.452C159.067 127.953 123.843 161.688 80.7383 161.688C37.6338 161.688 2.41053 127.953 0.0253906 85.4453H50.5977ZM80.7383 0C123.991 0 159.311 33.9671 161.478 76.6816H111.317C109.191 61.8173 96.4093 50.3906 80.957 50.3906C65.5051 50.391 52.7239 61.8176 50.5977 76.6816H0C2.16635 33.9672 37.4855 0.000197082 80.7383 0Z" fill="white" fill-opacity="0.3"/>
-              <circle cx="80.9579" cy="81.0632" r="15.3363" fill="white" fill-opacity="0.3"/>
+            <svg
+              v-if="!isFavorite(selectedPokemon?._id)"
+              class="detail-hero-mark"
+              viewBox="0 0 162 162"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+              aria-hidden="true"
+            >
+              <use href="#icon-pokeball-bg" />
+            </svg>
+
+            <svg
+              v-if="isFavorite(selectedPokemon?._id)"
+              class="detail-hero-energy-mark"
+              :viewBox="getEnergyIconViewBox(selectedPokemon)"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+              aria-hidden="true"
+            >
+              <use :href="'#' + getEnergyIconId(selectedPokemon)" />
             </svg>
 
             <img
               class="detail-hero-image"
               :class="{
                 silhouette: shouldUseSilhouette(selectedPokemon?._id),
-                revealing: isFavoriteRevealing(selectedPokemon?._id)
+                revealing: isFavoriteRevealing(selectedPokemon?._id),
+                'capture-hidden': isFavoriteHidden(selectedPokemon?._id)
               }"
               :src="selectedPokemon.imgUrl"
-              :alt="selectedPokemon.name || 'Pokemon'"
+              :alt="getDisplayName(selectedPokemon) || 'Pokemon'"
               loading="lazy"
               decoding="async"
             />
@@ -1168,76 +1366,234 @@ watch(
           </div>
 
           <div class="detail-content">
-            <span class="detail-type-pill" :style="{ '--type-pill-bg': getCardColor(selectedPokemon) }">
-              {{ getTypeLabel(getPrimaryType(selectedPokemon)) }}
-            </span>
-
-            <div class="group30-card">
-              <template
-                v-for="(evolution, spriteIndex) in selectedEvolutions"
-                :key="`${selectedPokemon._id}-evo-${evolution.name || spriteIndex}`"
+            <nav class="detail-section-tabs" aria-label="Sections informations du pokemon">
+              <button
+                type="button"
+                class="detail-section-tab"
+                :class="{ active: activeDetailSection === 'PROFILE' }"
+                @click="activeDetailSection = 'PROFILE'"
               >
-                <div class="group30-evo" :title="formatEvolutionName(evolution.name)">
+                PROFIL
+              </button>
+              <button
+                type="button"
+                class="detail-section-tab"
+                :class="{ active: activeDetailSection === 'ABILITIES' }"
+                @click="activeDetailSection = 'ABILITIES'"
+              >
+                TALENTS
+              </button>
+              <button
+                type="button"
+                class="detail-section-tab"
+                :class="{ active: activeDetailSection === 'STATS' }"
+                @click="activeDetailSection = 'STATS'"
+              >
+                STATS
+              </button>
+              <button
+                type="button"
+                class="detail-section-tab"
+                :class="{ active: activeDetailSection === 'ORIGIN' }"
+                @click="activeDetailSection = 'ORIGIN'"
+              >
+                ORIGINE
+              </button>
+            </nav>
+
+            <Transition name="detail-tab" mode="out-in">
+              <article
+                v-if="activeDetailSection === 'PROFILE'"
+                key="detail-profile"
+                class="detail-info-card detail-tab-panel detail-card-profile"
+              >
+                <div class="detail-card-head">
+                  <h4>PROFIL</h4>
+                  <span class="detail-dex-tag">{{ formatDexNumber(selectedPokemon) }}</span>
+                </div>
+
+                <div class="detail-type-row">
+                  <span class="detail-type-pill" :style="{ '--type-pill-bg': getCardColor(selectedPokemon) }">
+                    {{ getTypeLabel(getPrimaryType(selectedPokemon)) }}
+                  </span>
+
+                  <span
+                    v-for="type in getSecondaryTypes(selectedPokemon)"
+                    :key="`${selectedPokemon._id}-type-${type}`"
+                    class="detail-type-chip"
+                    :style="{ '--type-pill-bg': TYPE_COLORS[type] || '#8aa9d8' }"
+                  >
+                    {{ getTypeLabel(type) }}
+                  </span>
+                </div>
+
+                <dl class="detail-kv-grid">
+                  <div>
+                    <dt>TAILLE</dt>
+                    <dd>{{ formatHeight(selectedPokemon.height) }}</dd>
+                  </div>
+                  <div>
+                    <dt>POIDS</dt>
+                    <dd>{{ formatWeight(selectedPokemon.weight) }}</dd>
+                  </div>
+                  <div>
+                    <dt>EXP. BASE</dt>
+                    <dd>
+                      {{
+                        Number.isFinite(Number(selectedPokemon?.baseExperience))
+                          ? Number(selectedPokemon.baseExperience)
+                          : '-'
+                      }}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>GENRE</dt>
+                    <dd>{{ getGenderRatio(selectedPokemon) }}</dd>
+                  </div>
+                </dl>
+              </article>
+
+              <article
+                v-else-if="activeDetailSection === 'ABILITIES'"
+                key="detail-abilities"
+                class="detail-info-card detail-tab-panel detail-card-abilities"
+              >
+                <div class="detail-card-head">
+                  <h4>TALENTS</h4>
+                </div>
+
+                <ul class="detail-ability-list">
+                  <li
+                    v-for="ability in getAbilityList(selectedPokemon)"
+                    :key="`${selectedPokemon._id}-ability-${ability.name}`"
+                  >
+                    <span>{{ ability.name }}</span>
+                    <small v-if="ability.isHidden">CACHE</small>
+                  </li>
+                  <li v-if="!getAbilityList(selectedPokemon).length" class="detail-muted">-</li>
+                </ul>
+
+                <div class="detail-subline">
+                  <span>GROUPES OEUF</span>
+                  <strong>{{ getEggGroupLabel(selectedPokemon) }}</strong>
+                </div>
+              </article>
+
+              <article
+                v-else-if="activeDetailSection === 'STATS'"
+                key="detail-stats"
+                class="detail-info-card detail-tab-panel detail-card-stats"
+              >
+                <div class="detail-card-head">
+                  <h4>STATS</h4>
+                  <span class="detail-total-tag">TOTAL {{ getBaseStats(selectedPokemon).total }}</span>
+                </div>
+
+                <ul class="detail-stat-list">
+                  <li
+                    v-for="stat in getBaseStatEntries(selectedPokemon)"
+                    :key="`${selectedPokemon._id}-stat-${stat.key}`"
+                  >
+                    <span class="detail-stat-label">{{ stat.label }}</span>
+                    <span class="detail-stat-track" aria-hidden="true">
+                      <span class="detail-stat-fill" :style="{ width: `${getStatPercent(stat.value)}%` }"></span>
+                    </span>
+                    <strong class="detail-stat-value">{{ stat.value }}</strong>
+                  </li>
+                </ul>
+              </article>
+
+              <article v-else key="detail-origin" class="detail-info-card detail-tab-panel detail-card-origin">
+                <div class="detail-card-head">
+                  <h4>ORIGINE</h4>
+                </div>
+
+                <article class="region-card">
                   <img
-                    class="group30-sprite"
-                    :class="{
-                      silhouette: shouldUseSilhouette(selectedPokemon?._id),
-                      revealing: isFavoriteRevealing(selectedPokemon?._id)
-                    }"
-                    :src="evolution.sprite"
-                    :alt="formatEvolutionName(evolution.name)"
+                    class="region-map-image"
+                    :src="getRegionImageUrl(selectedPokemon)"
+                    :alt="`Carte ${getRegionName(selectedPokemon)}`"
                     loading="lazy"
                     decoding="async"
                   />
-                  <span class="group30-name">{{ formatEvolutionName(evolution.name) }}</span>
+                  <span class="region-name">{{ getRegionName(selectedPokemon).toUpperCase() }}</span>
+                </article>
+
+                <dl class="detail-kv-grid compact">
+                  <div>
+                    <dt>GENERATION</dt>
+                    <dd>{{ formatSlugLabel(selectedPokemon?.generation) }}</dd>
+                  </div>
+                  <div>
+                    <dt>HABITAT</dt>
+                    <dd>{{ formatSlugLabel(selectedPokemon?.habitat) }}</dd>
+                  </div>
+                  <div>
+                    <dt>CROISSANCE</dt>
+                    <dd>{{ formatSlugLabel(selectedPokemon?.growthRate) }}</dd>
+                  </div>
+                  <div>
+                    <dt>CAPTURE</dt>
+                    <dd>{{ getCaptureRate(selectedPokemon) }}</dd>
+                  </div>
+                </dl>
+
+                <div class="detail-flag-row">
+                  <span v-for="flag in getMetaFlags(selectedPokemon)" :key="`${selectedPokemon._id}-flag-${flag}`">
+                    {{ flag }}
+                  </span>
                 </div>
-                <span v-if="spriteIndex < selectedEvolutions.length - 1" class="group30-arrow" aria-hidden="true">→</span>
-              </template>
-            </div>
-
-            <div class="detail-info-row">
-              <article class="region-card">
-                <img
-                  class="region-map-image"
-                  :src="getRegionImageUrl(selectedPokemon)"
-                  :alt="`Carte ${getRegionName(selectedPokemon)}`"
-                  loading="lazy"
-                  decoding="async"
-                />
-                <span class="region-name">{{ getRegionName(selectedPokemon).toUpperCase() }}</span>
               </article>
+            </Transition>
 
-              <article class="stats-card">
-                <div class="stats-label">POIDS</div>
-                <div class="stats-value">{{ formatWeight(selectedPokemon.weight) }}</div>
-                <hr />
-                <div class="stats-label">TAILLE</div>
-                <div class="stats-value">{{ formatHeight(selectedPokemon.height) }}</div>
-              </article>
-            </div>
-
-            <section class="detail-description">
-              <div class="detail-description-head">
-                <h4>DESCRIPTION</h4>
-                <button
-                  class="detail-description-audio"
-                  :class="{ playing: isDescriptionPlaying }"
-                  type="button"
-                  :disabled="!descriptionSpeechSupported"
-                  @click="toggleDescriptionPlayback"
-                  :aria-label="
-                    isDescriptionPlaying
-                      ? 'Arreter la lecture de la description'
-                      : 'Ecouter la description'
-                  "
+            <div class="detail-lower-grid">
+              <div class="group30-card">
+                <template
+                  v-for="(evolution, spriteIndex) in selectedEvolutions"
+                  :key="`${selectedPokemon._id}-evo-${evolution.name || spriteIndex}`"
                 >
-                  {{ isDescriptionPlaying ? 'STOP AUDIO' : 'AUDIO' }}
-                </button>
+                  <div class="group30-evo" :title="formatEvolutionName(evolution.name)">
+                    <img
+                      class="group30-sprite"
+                      :class="{
+                        silhouette: shouldUseSilhouette(selectedPokemon?._id)
+                      }"
+                      :src="evolution.sprite"
+                      :alt="formatEvolutionName(evolution.name)"
+                      loading="lazy"
+                      decoding="async"
+                    />
+                    <span class="group30-name">{{ formatEvolutionName(evolution.name) }}</span>
+                  </div>
+                  <span v-if="spriteIndex < selectedEvolutions.length - 1" class="group30-arrow" aria-hidden="true">
+                    →
+                  </span>
+                </template>
               </div>
-              <p>
-                {{ getDescriptionText(selectedPokemon) }}
-              </p>
-            </section>
+
+              <section class="detail-description">
+                <div class="detail-description-head">
+                  <h4>DESCRIPTION</h4>
+                  <button
+                    class="detail-description-audio"
+                    :class="{ playing: isDescriptionPlaying }"
+                    type="button"
+                    :disabled="!descriptionSpeechSupported"
+                    @click="toggleDescriptionPlayback"
+                    :aria-label="
+                      isDescriptionPlaying
+                        ? 'Arreter la lecture de la description'
+                        : 'Ecouter la description'
+                    "
+                  >
+                    {{ isDescriptionPlaying ? 'STOP AUDIO' : 'AUDIO' }}
+                  </button>
+                </div>
+                <p>
+                  {{ getDescriptionText(selectedPokemon) }}
+                </p>
+              </section>
+            </div>
           </div>
             </aside>
           </Transition>
@@ -1248,6 +1604,7 @@ watch(
     <button
       type="button"
       class="filter-fab"
+      :class="{ active: showSearch }"
       @click="toggleSearch"
       :aria-expanded="showSearch"
       aria-controls="search-panel"
@@ -1255,10 +1612,12 @@ watch(
     >
       <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
         <path
+          v-if="!showSearch"
           d="M4 5h16l-6.2 7.1v5.3l-3.6 1.8v-7.1L4 5z"
           stroke-linecap="round"
           stroke-linejoin="round"
         />
+        <path v-else d="M6 6l12 12M18 6L6 18" stroke-linecap="round" stroke-linejoin="round" />
       </svg>
     </button>
 
@@ -1487,12 +1846,22 @@ watch(
   z-index: 2;
 }
 
+.pokeball-mark,
 .energy-mark {
   width: clamp(150px, 15vw, 250px);
   position: absolute;
   right: -56px;
   bottom: -42px;
   pointer-events: none;
+}
+
+.pokeball-mark {
+  z-index: 0;
+}
+
+.energy-mark {
+  z-index: 0;
+  opacity: 0.95;
 }
 
 .pokemon-name {
@@ -1509,9 +1878,11 @@ watch(
 
 .favorite-btn {
   position: absolute;
-  left: clamp(26px, 2.1vw, 40px);
-  top: 52%;
-  transform: translateY(-50%);
+  left: clamp(12px, 1.2vw, 18px);
+  bottom: clamp(10px, 1.1vw, 18px);
+  transform: translate3d(0, 0, 0);
+  --favorite-catch-x: 106px;
+  --favorite-catch-y: -78px;
   width: 56px;
   aspect-ratio: 1 / 1;
   border: 0;
@@ -1525,7 +1896,7 @@ watch(
 }
 
 .favorite-btn:active {
-  transform: translateY(-50%) scale(0.94);
+  transform: scale(0.94);
 }
 
 .favorite-icon {
@@ -1536,9 +1907,14 @@ watch(
   display: block;
 }
 
+.favorite-btn.is-launching,
+.detail-ball-toggle.is-launching {
+  animation: favorite-ball-launch 1000ms cubic-bezier(0.32, 0.9, 0.36, 1) 1 both;
+}
+
 .favorite-btn.is-catching .favorite-icon,
 .detail-ball-toggle.is-catching .favorite-icon {
-  animation: pokeball-catch-shake 2.2s cubic-bezier(0.34, 1.56, 0.64, 1) 1;
+  animation: pokeball-catch-shake 1.95s cubic-bezier(0.34, 1.56, 0.64, 1) 1;
 }
 
 .pokeball-burst {
@@ -1604,7 +1980,12 @@ watch(
 }
 
 .pokemon-image.revealing {
-  animation: silhouette-fade-out-card 420ms ease-out forwards;
+  transform-origin: center center;
+  animation: silhouette-collapse-card 320ms cubic-bezier(0.3, 0.82, 0.25, 1) forwards;
+}
+
+.pokemon-image.capture-hidden {
+  opacity: 0;
 }
 
 .pokemon-image-conceal {
@@ -1625,7 +2006,7 @@ watch(
   position: relative;
   top: 0;
   width: 100%;
-  max-height: none;
+  max-height: calc(100dvh - 40px);
   display: flex;
   flex-direction: column;
   border-radius: 24px;
@@ -1815,13 +2196,18 @@ watch(
   display: none;
 }
 
-.detail-hero-mark {
+.detail-hero-mark,
+.detail-hero-energy-mark {
   position: absolute;
   right: -24px;
   bottom: 12px;
   width: 186px;
   height: 186px;
   pointer-events: none;
+}
+
+.detail-hero-energy-mark {
+  opacity: 0.95;
 }
 
 .detail-hero-image {
@@ -1841,7 +2227,12 @@ watch(
 }
 
 .detail-hero-image.revealing {
-  animation: silhouette-fade-out-detail 420ms ease-out forwards;
+  transform-origin: center center;
+  animation: silhouette-collapse-detail 320ms cubic-bezier(0.3, 0.82, 0.25, 1) forwards;
+}
+
+.detail-hero-image.capture-hidden {
+  opacity: 0;
 }
 
 .detail-hero-image-conceal {
@@ -1861,26 +2252,316 @@ watch(
 .detail-content {
   flex: 1 1 auto;
   min-height: 0;
-  overflow: visible;
+  overflow: hidden;
   overscroll-behavior: contain;
   padding: 10px 12px 14px;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.detail-section-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.detail-section-tab {
+  border: 0;
+  border-radius: 10px;
+  background: rgba(118, 186, 208, 0.24);
+  color: rgba(18, 52, 66, 0.68);
+  font-family: 'Poppins', 'Segoe UI', sans-serif;
+  font-size: 0.64rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  line-height: 1;
+  padding: 8px 5px;
+  cursor: pointer;
+  transition: background-color 160ms ease, color 160ms ease, transform 120ms ease;
+}
+
+.detail-section-tab:hover {
+  background: rgba(102, 174, 198, 0.34);
+}
+
+.detail-section-tab.active {
+  background: #6eaed6;
+  color: #eef8ff;
+  box-shadow: 0 6px 10px rgba(41, 87, 111, 0.2);
+}
+
+.detail-section-tab:active {
+  transform: scale(0.97);
+}
+
+.detail-tab-enter-active,
+.detail-tab-leave-active {
+  transition: opacity 190ms ease, transform 240ms ease;
+}
+
+.detail-tab-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+.detail-tab-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
 }
 
 .detail-type-pill {
   --type-pill-bg: #78b2df;
-  display: block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: fit-content;
-  margin: 0px auto 10px;
   background: var(--type-pill-bg);
   color: #eef8ff;
   font-family: 'Poppins', 'Segoe UI', sans-serif;
-  font-weight: 900;
-  font-size: 0.94rem;
+  font-weight: 800;
+  font-size: 0.76rem;
   border-radius: 999px;
-  padding: 8px 23px;
-  letter-spacing: 0.05em;
-  box-shadow: 0 6px 10px rgba(41, 87, 111, 0.28);
+  padding: 6px 14px;
+  letter-spacing: 0.04em;
+  box-shadow: 0 6px 10px rgba(41, 87, 111, 0.2);
   text-transform: uppercase;
+}
+
+.detail-type-chip {
+  --type-pill-bg: #8ba8ce;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--type-pill-bg) 80%, white 20%);
+  color: #163246;
+  font-family: 'Poppins', 'Segoe UI', sans-serif;
+  font-weight: 800;
+  font-size: 0.7rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  padding: 5px 10px;
+}
+
+.detail-info-card {
+  background: #d6f2f4;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.52);
+  box-shadow: 0 4px 10px rgba(39, 79, 87, 0.18);
+  padding: 9px;
+  min-height: 118px;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
+
+.detail-tab-panel {
+  min-height: 0;
+}
+
+.detail-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.detail-card-head h4 {
+  margin: 0;
+  color: #11303f;
+  font-family: 'Poppins', 'Segoe UI', sans-serif;
+  font-size: 0.84rem;
+  line-height: 1;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  font-weight: 900;
+}
+
+.detail-dex-tag,
+.detail-total-tag {
+  font-family: 'Poppins', 'Segoe UI', sans-serif;
+  font-size: 0.66rem;
+  font-weight: 800;
+  color: #18394b;
+  background: rgba(115, 160, 244, 0.18);
+  border-radius: 999px;
+  padding: 4px 8px;
+  letter-spacing: 0.03em;
+}
+
+.detail-type-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.detail-kv-grid {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 8px;
+}
+
+.detail-kv-grid.compact {
+  gap: 4px 8px;
+}
+
+.detail-kv-grid div {
+  display: grid;
+  gap: 1px;
+}
+
+.detail-kv-grid dt {
+  margin: 0;
+  font-family: 'Poppins', 'Segoe UI', sans-serif;
+  font-size: 0.58rem;
+  letter-spacing: 0.05em;
+  color: rgba(17, 48, 63, 0.72);
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.detail-kv-grid dd {
+  margin: 0;
+  font-family: 'Poppins', 'Segoe UI', sans-serif;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #0f2834;
+  line-height: 1.2;
+}
+
+.detail-ability-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.detail-ability-list li {
+  min-height: 23px;
+  border-radius: 8px;
+  background: rgba(120, 186, 208, 0.2);
+  padding: 4px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-family: 'Poppins', 'Segoe UI', sans-serif;
+  font-size: 0.72rem;
+  line-height: 1;
+  color: #143646;
+  font-weight: 700;
+}
+
+.detail-ability-list small {
+  font-size: 0.54rem;
+  letter-spacing: 0.04em;
+  font-weight: 900;
+  color: #26566d;
+}
+
+.detail-muted {
+  justify-content: center !important;
+}
+
+.detail-subline {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.detail-subline span {
+  font-family: 'Poppins', 'Segoe UI', sans-serif;
+  font-size: 0.56rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: rgba(17, 48, 63, 0.72);
+  font-weight: 800;
+}
+
+.detail-subline strong {
+  font-family: 'Poppins', 'Segoe UI', sans-serif;
+  font-size: 0.68rem;
+  color: #0f2834;
+  font-weight: 800;
+  text-align: right;
+}
+
+.detail-stat-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.detail-stat-list li {
+  display: grid;
+  grid-template-columns: 46px 1fr auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.detail-stat-label {
+  font-family: 'Poppins', 'Segoe UI', sans-serif;
+  font-size: 0.62rem;
+  letter-spacing: 0.04em;
+  color: #184050;
+  font-weight: 800;
+}
+
+.detail-stat-track {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 7px;
+  border-radius: 999px;
+  background: rgba(104, 165, 185, 0.26);
+  overflow: hidden;
+}
+
+.detail-stat-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #6aa6d9 0%, #7fd0e1 100%);
+}
+
+.detail-stat-value {
+  font-family: 'Poppins', 'Segoe UI', sans-serif;
+  font-size: 0.68rem;
+  color: #0f2834;
+  font-weight: 800;
+}
+
+.detail-flag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.detail-flag-row span {
+  border-radius: 999px;
+  background: rgba(66, 122, 141, 0.2);
+  color: #184456;
+  font-family: 'Poppins', 'Segoe UI', sans-serif;
+  font-size: 0.58rem;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  font-weight: 900;
+  text-transform: uppercase;
+  padding: 4px 7px;
+}
+
+.detail-lower-grid {
+  display: grid;
+  gap: 8px;
 }
 
 .group30-card {
@@ -1892,7 +2573,7 @@ watch(
   align-items: center;
   justify-content: center;
   gap: 5px;
-  min-height: 94px;
+  min-height: 78px;
 }
 
 .group30-evo {
@@ -1902,8 +2583,8 @@ watch(
 }
 
 .group30-sprite {
-  width: 62px;
-  height: 62px;
+  width: 56px;
+  height: 56px;
   object-fit: contain;
   transition: filter 220ms ease, opacity 220ms ease;
 }
@@ -1916,52 +2597,83 @@ watch(
   animation: silhouette-fade-out-sprite 420ms ease-out forwards;
 }
 
+@keyframes favorite-ball-launch {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+
+  60% {
+    transform: translate3d(var(--favorite-catch-x, 106px), var(--favorite-catch-y, -78px), 0)
+      scale(0.94);
+  }
+
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
 @keyframes pokeball-catch-shake {
   0%,
   100% {
     transform: translate3d(0, 0, 0) rotate(0deg);
   }
 
-  10% {
+  5.13% {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+  }
+
+  8.2% {
     transform: translate3d(-2px, 0, 0) rotate(-8deg);
   }
 
-  20% {
+  10.25% {
     transform: translate3d(2px, 0, 0) rotate(8deg);
   }
 
-  30% {
+  12.3% {
     transform: translate3d(-2px, 0, 0) rotate(-8deg);
   }
 
-  40% {
+  15.38% {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+  }
+
+  71.79% {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+  }
+
+  74.87% {
+    transform: translate3d(-2px, 0, 0) rotate(-8deg);
+  }
+
+  76.92% {
     transform: translate3d(2px, 0, 0) rotate(8deg);
   }
 
-  50% {
-    transform: translate3d(-1.2px, 0, 0) rotate(-5deg);
+  78.97% {
+    transform: translate3d(-2px, 0, 0) rotate(-8deg);
   }
 
-  60% {
-    transform: translate3d(1.2px, 0, 0) rotate(5deg);
-  }
-
-  70% {
-    transform: translate3d(-0.8px, 0, 0) rotate(-3deg);
-  }
-
-  80% {
-    transform: translate3d(0.8px, 0, 0) rotate(3deg);
+  82.05% {
+    transform: translate3d(0, 0, 0) rotate(0deg);
   }
 }
 
-@keyframes silhouette-fade-out-card {
+@keyframes silhouette-collapse-card {
   0% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
     filter: brightness(0) saturate(100%) drop-shadow(0 5px 9px rgba(0, 0, 0, 0.18));
   }
 
+  45% {
+    opacity: 1;
+  }
+
   100% {
-    filter: drop-shadow(0 5px 9px rgba(0, 0, 0, 0.18));
+    opacity: 0;
+    transform: translate3d(0, 0, 0) scale(0.03);
+    filter: brightness(0) saturate(100%) drop-shadow(0 5px 9px rgba(0, 0, 0, 0.18));
   }
 }
 
@@ -1981,13 +2693,21 @@ watch(
   }
 }
 
-@keyframes silhouette-fade-out-detail {
+@keyframes silhouette-collapse-detail {
   0% {
+    opacity: 1;
+    transform: translateX(-50%) scale(1);
     filter: brightness(0) saturate(100%) drop-shadow(0 12px 14px rgba(0, 0, 0, 0.2));
   }
 
+  45% {
+    opacity: 1;
+  }
+
   100% {
-    filter: drop-shadow(0 12px 14px rgba(0, 0, 0, 0.2));
+    opacity: 0;
+    transform: translateX(-50%) scale(0.03);
+    filter: brightness(0) saturate(100%) drop-shadow(0 12px 14px rgba(0, 0, 0, 0.2));
   }
 }
 
@@ -2085,19 +2805,12 @@ watch(
   margin: 0 1px;
 }
 
-.detail-info-row {
-  margin-top: 10px;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 9px;
-}
-
 .region-card {
   position: relative;
   overflow: hidden;
-  min-height: 106px;
+  min-height: 74px;
   border-radius: 12px;
-  background: #b6e7e5;
+  background: #bcebed;
   box-shadow: 0 4px 10px rgba(39, 79, 87, 0.2);
   border: 1px solid rgba(255, 255, 255, 0.5);
 }
@@ -2118,49 +2831,14 @@ watch(
   color: #111111;
   font-family: 'Poppins', 'Segoe UI', sans-serif;
   font-weight: 900;
-  font-size: 1.35rem;
+  font-size: 1.05rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   text-shadow: 0 1px 0 rgba(255, 255, 255, 0.7);
 }
 
-.stats-card {
-  min-height: 106px;
-  border-radius: 12px;
-  background: #b6e7e5;
-  box-shadow: 0 4px 10px rgba(39, 79, 87, 0.2);
-  padding: 10px 12px;
-  display: grid;
-  align-content: center;
-  justify-items: center;
-  gap: 3px;
-}
-
-.stats-card hr {
-  width: 100%;
-  border: 0;
-  border-top: 1px solid rgba(0, 0, 0, 0.35);
-  margin: 2px 0;
-}
-
-.stats-label {
-  font-family: 'Poppins', 'Segoe UI', sans-serif;
-  font-size: 1.2rem;
-  line-height: 1;
-  font-weight: 900;
-  color: #111111;
-}
-
-.stats-value {
-  font-family: 'Poppins', 'Segoe UI', sans-serif;
-  font-size: 1rem;
-  line-height: 1;
-  font-weight: 700;
-  color: rgba(17, 17, 17, 0.78);
-}
-
 .detail-description {
-  margin-top: 10px;
+  margin-top: 0;
 }
 
 .detail-description-head {
@@ -2215,6 +2893,10 @@ watch(
   font-size: 0.95rem;
   line-height: 1.45;
   font-family: 'Poppins', 'Segoe UI', sans-serif;
+  display: -webkit-box;
+  -webkit-line-clamp: 7;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .filter-fab {
@@ -2406,24 +3088,29 @@ watch(
     width: clamp(300px, 29vw, 390px);
   }
 
+  .detail-section-tab {
+    font-size: 0.6rem;
+    padding: 7px 4px;
+  }
+
   .region-name {
-    font-size: 1.2rem;
+    font-size: 0.95rem;
   }
 
-  .stats-label {
-    font-size: 1.1rem;
+  .detail-card-head h4 {
+    font-size: 0.78rem;
   }
 
-  .stats-value {
-    font-size: 0.94rem;
+  .detail-kv-grid dd {
+    font-size: 0.69rem;
   }
 
   .detail-description h4 {
-    font-size: 1.18rem;
+    font-size: 1.08rem;
   }
 
   .detail-description p {
-    font-size: 0.86rem;
+    font-size: 0.84rem;
   }
 }
 
@@ -2547,6 +3234,7 @@ watch(
     width: min(56%, 280px);
   }
 
+  .pokeball-mark,
   .energy-mark {
     width: 190px;
     right: -42px;
@@ -2555,7 +3243,10 @@ watch(
 
   .favorite-btn {
     width: 50px;
-    left: 18px;
+    left: 12px;
+    bottom: 10px;
+    --favorite-catch-x: 84px;
+    --favorite-catch-y: -64px;
   }
 
   .pokemon-name {
@@ -2571,7 +3262,8 @@ watch(
     font-size: 15px;
   }
 
-  .detail-hero-mark {
+  .detail-hero-mark,
+  .detail-hero-energy-mark {
     width: 160px;
     height: 160px;
     right: -30px;
@@ -2594,6 +3286,16 @@ watch(
     padding: 12px;
   }
 
+  .detail-section-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+  }
+
+  .detail-section-tab {
+    font-size: 0.62rem;
+    padding: 8px 6px;
+  }
+
   .group30-card {
     min-height: 86px;
     padding: 10px 6px;
@@ -2609,28 +3311,20 @@ watch(
     font-size: 1.2rem;
   }
 
-  .detail-info-row {
-    grid-template-columns: 1fr;
-  }
-
   .region-name {
-    font-size: 1.2rem;
-  }
-
-  .stats-label {
-    font-size: 1.1rem;
-  }
-
-  .stats-value {
     font-size: 0.95rem;
   }
 
+  .detail-kv-grid {
+    grid-template-columns: 1fr;
+  }
+
   .detail-description h4 {
-    font-size: 1.1rem;
+    font-size: 1rem;
   }
 
   .detail-description p {
-    font-size: 0.92rem;
+    font-size: 0.88rem;
   }
 }
 </style>

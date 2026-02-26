@@ -25,6 +25,120 @@ function assertObjectId(id, fieldName = "id") {
   }
 }
 
+function parseMaybeJson(value) {
+  if (typeof value !== "string") return value;
+  const trimmed = value.trim();
+  if (!trimmed) return value;
+  if (!(trimmed.startsWith("{") || trimmed.startsWith("["))) return value;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return value;
+  }
+}
+
+function toFiniteNumberOrUndefined(value) {
+  if (value === undefined || value === null || value === "") return undefined;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : undefined;
+}
+
+function toTrimmedStringOrUndefined(value) {
+  if (value === undefined || value === null) return undefined;
+  return String(value).trim();
+}
+
+function normalizeStringArray(value) {
+  const raw = parseMaybeJson(value);
+  if (!Array.isArray(raw)) return [];
+  return raw.map((entry) => String(entry || "").trim()).filter(Boolean);
+}
+
+function normalizeAbilities(value) {
+  const raw = parseMaybeJson(value);
+  if (!Array.isArray(raw)) return [];
+
+  return raw
+    .map((ability, index) => {
+      const base = ability && typeof ability === "object" ? ability : {};
+      const name = String(base.name || "").trim();
+      if (!name) return null;
+      return {
+        name,
+        isHidden: toBoolean(base.isHidden ?? base.is_hidden),
+        slot: Number.isFinite(Number(base.slot)) ? Number(base.slot) : index + 1
+      };
+    })
+    .filter(Boolean);
+}
+
+function normalizeBaseStats(value) {
+  const raw = parseMaybeJson(value);
+  const source = raw && typeof raw === "object" ? raw : {};
+
+  const hp = Math.max(0, Number(source.hp) || 0);
+  const attack = Math.max(0, Number(source.attack) || 0);
+  const defense = Math.max(0, Number(source.defense) || 0);
+  const specialAttack = Math.max(0, Number(source.specialAttack ?? source.special_attack) || 0);
+  const specialDefense = Math.max(
+    0,
+    Number(source.specialDefense ?? source.special_defense) || 0
+  );
+  const speed = Math.max(0, Number(source.speed) || 0);
+  const total = Math.max(0, Number(source.total) || hp + attack + defense + specialAttack + specialDefense + speed);
+
+  return { hp, attack, defense, specialAttack, specialDefense, speed, total };
+}
+
+function buildExtendedPokemonFields(payload = {}) {
+  const next = {};
+
+  if (payload.pokeApiId !== undefined) {
+    const pokeApiId = toFiniteNumberOrUndefined(payload.pokeApiId);
+    if (pokeApiId !== undefined) next.pokeApiId = pokeApiId;
+  }
+
+  if (payload.nationalDexNumber !== undefined) {
+    const nationalDexNumber = toFiniteNumberOrUndefined(payload.nationalDexNumber);
+    if (nationalDexNumber !== undefined) next.nationalDexNumber = nationalDexNumber;
+  }
+
+  if (payload.slug !== undefined) next.slug = toTrimmedStringOrUndefined(payload.slug) || "";
+  if (payload.displayName !== undefined) {
+    next.displayName = toTrimmedStringOrUndefined(payload.displayName) || "";
+  }
+  if (payload.spriteUrl !== undefined) next.spriteUrl = toTrimmedStringOrUndefined(payload.spriteUrl) || "";
+
+  if (payload.height !== undefined) next.height = toFiniteNumberOrUndefined(payload.height);
+  if (payload.weight !== undefined) next.weight = toFiniteNumberOrUndefined(payload.weight);
+  if (payload.baseExperience !== undefined) {
+    next.baseExperience = toFiniteNumberOrUndefined(payload.baseExperience);
+  }
+
+  if (payload.generation !== undefined) next.generation = toTrimmedStringOrUndefined(payload.generation) || "";
+  if (payload.habitat !== undefined) next.habitat = toTrimmedStringOrUndefined(payload.habitat) || "";
+  if (payload.shape !== undefined) next.shape = toTrimmedStringOrUndefined(payload.shape) || "";
+  if (payload.color !== undefined) next.color = toTrimmedStringOrUndefined(payload.color) || "";
+  if (payload.growthRate !== undefined) next.growthRate = toTrimmedStringOrUndefined(payload.growthRate) || "";
+
+  if (payload.eggGroups !== undefined) next.eggGroups = normalizeStringArray(payload.eggGroups);
+  if (payload.abilities !== undefined) next.abilities = normalizeAbilities(payload.abilities);
+  if (payload.baseStats !== undefined) next.baseStats = normalizeBaseStats(payload.baseStats);
+
+  if (payload.captureRate !== undefined) next.captureRate = toFiniteNumberOrUndefined(payload.captureRate);
+  if (payload.baseHappiness !== undefined) {
+    next.baseHappiness = toFiniteNumberOrUndefined(payload.baseHappiness);
+  }
+  if (payload.hatchCounter !== undefined) next.hatchCounter = toFiniteNumberOrUndefined(payload.hatchCounter);
+  if (payload.genderRate !== undefined) next.genderRate = toFiniteNumberOrUndefined(payload.genderRate);
+
+  if (payload.isLegendary !== undefined) next.isLegendary = toBoolean(payload.isLegendary);
+  if (payload.isMythical !== undefined) next.isMythical = toBoolean(payload.isMythical);
+  if (payload.isBaby !== undefined) next.isBaby = toBoolean(payload.isBaby);
+
+  return next;
+}
+
 function enrichRegions(regions) {
   if (!Array.isArray(regions)) return [];
 
@@ -73,10 +187,18 @@ async function createPokemon(payload) {
     throw err;
   }
 
-  const typesRaw = payload.types ?? [];
-  const types = Array.isArray(typesRaw)
-    ? typesRaw.map(normalizeType)
-    : [normalizeType(typesRaw)];
+  const typesRaw = parseMaybeJson(payload.types ?? []);
+  let types = [];
+  if (Array.isArray(typesRaw)) {
+    types = typesRaw.map(normalizeType);
+  } else if (typeof typesRaw === "string" && typesRaw.includes(",")) {
+    types = typesRaw
+      .split(",")
+      .map((entry) => normalizeType(entry))
+      .filter(Boolean);
+  } else {
+    types = [normalizeType(typesRaw)];
+  }
 
   const manualCryUrl = String(payload.cryUrl || "").trim();
   let resolvedCryUrl = manualCryUrl;
@@ -84,14 +206,14 @@ async function createPokemon(payload) {
     resolvedCryUrl = await fetchPokemonCryUrlFromPokepedia(name);
   }
 
-  // NOUVEAU : On ajoute height et weight
+  const extendedFields = buildExtendedPokemonFields(payload);
+
   const pkmn = await Pokemon.create({
     name,
     imgUrl,
+    ...extendedFields,
     cryUrl: resolvedCryUrl,
     description: String(payload.description || ""),
-    height: payload.height ? Number(payload.height) : undefined,
-    weight: payload.weight ? Number(payload.weight) : undefined,
     types,
     regions: []
   });
@@ -160,7 +282,8 @@ async function searchPokemons({ page = 1, size = 20, typeOne, typeTwo, partialNa
   const filter = {};
 
   if (partialName) {
-    filter.name = { $regex: String(partialName), $options: "i" };
+    const regex = { $regex: String(partialName), $options: "i" };
+    filter.$or = [{ name: regex }, { displayName: regex }, { slug: regex }];
   }
 
   const types = [];
@@ -171,7 +294,7 @@ async function searchPokemons({ page = 1, size = 20, typeOne, typeTwo, partialNa
   if (types.length === 2) filter.types = { $all: types };
 
   const [data, count] = await Promise.all([
-    Pokemon.find(filter).sort({ name: 1 }).skip((p - 1) * s).limit(s),
+    Pokemon.find(filter).sort({ nationalDexNumber: 1, name: 1 }).skip((p - 1) * s).limit(s),
     Pokemon.countDocuments(filter)
   ]);
 
@@ -192,7 +315,11 @@ async function getOne({ id, name }) {
   }
 
   if (name) {
-    const p = await Pokemon.findOne({ name: String(name).trim() });
+    const exactName = String(name).trim();
+    const p =
+      (await Pokemon.findOne({ name: exactName })) ||
+      (await Pokemon.findOne({ displayName: exactName })) ||
+      (await Pokemon.findOne({ slug: exactName }));
     if (!p) {
       const err = new Error("Pokemon introuvable");
       err.statusCode = 404;
@@ -240,19 +367,29 @@ async function updatePokemon({ id, patch }) {
   }
 
   const updates = {};
+  const extendedFields = buildExtendedPokemonFields(patch);
+  Object.assign(updates, extendedFields);
 
   if (patch.name !== undefined) updates.name = String(patch.name).trim();
   if (patch.imgUrl !== undefined) updates.imgUrl = String(patch.imgUrl).trim();
   if (patch.cryUrl !== undefined) updates.cryUrl = String(patch.cryUrl).trim();
   if (patch.description !== undefined) updates.description = String(patch.description);
-  
-  // NOUVEAU : Mise à jour de la taille et du poids
-  if (patch.height !== undefined) updates.height = Number(patch.height);
-  if (patch.weight !== undefined) updates.weight = Number(patch.weight);
 
   if (patch.types !== undefined) {
-    const raw = patch.types;
-    const types = Array.isArray(raw) ? raw.map(normalizeType) : [normalizeType(raw)];
+    const raw = parseMaybeJson(patch.types);
+    let types = [];
+
+    if (Array.isArray(raw)) {
+      types = raw.map(normalizeType);
+    } else if (typeof raw === "string" && raw.includes(",")) {
+      types = raw
+        .split(",")
+        .map((entry) => normalizeType(entry))
+        .filter(Boolean);
+    } else {
+      types = [normalizeType(raw)];
+    }
+
     updates.types = types;
   }
 
