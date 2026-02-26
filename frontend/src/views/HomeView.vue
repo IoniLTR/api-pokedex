@@ -544,17 +544,44 @@ const getFallbackEvolutions = (pokemon) => {
   if (!currentDex) {
     const fallbackSprite = String(pokemon?.imgUrl || '').trim()
     return fallbackSprite
-      ? [{ name: String(pokemon?.name || 'Inconnu'), sprite: fallbackSprite }]
+      ? [{ name: String(pokemon?.name || 'Inconnu'), sprite: fallbackSprite, dexNumber: null }]
       : []
   }
 
   const first = Math.max(1, currentDex - 2)
   const second = Math.max(1, currentDex - 1)
   return [
-    { name: `#${first}`, sprite: getOfficialArtworkUrl(first) },
-    { name: `#${second}`, sprite: getOfficialArtworkUrl(second) },
-    { name: String(pokemon?.name || `#${currentDex}`), sprite: getOfficialArtworkUrl(currentDex) }
+    { name: `#${first}`, sprite: getOfficialArtworkUrl(first), dexNumber: first },
+    { name: `#${second}`, sprite: getOfficialArtworkUrl(second), dexNumber: second },
+    {
+      name: String(pokemon?.name || `#${currentDex}`),
+      sprite: getOfficialArtworkUrl(currentDex),
+      dexNumber: currentDex
+    }
   ]
+}
+
+const openEvolutionDetails = (evolution) => {
+  const dexNumber = Number(evolution?.dexNumber)
+  const normalizedEvolutionName = normalizeToken(evolution?.name || '')
+
+  const pokemonByDex = Number.isFinite(dexNumber)
+    ? pokemons.value.find((item) => getPokedexNumber(item) === dexNumber)
+    : null
+
+  const pokemonByName =
+    !pokemonByDex && normalizedEvolutionName
+      ? pokemons.value.find((item) => {
+          const displayName = normalizeToken(getDisplayName(item))
+          const baseName = normalizeToken(item?.name || '')
+          return displayName === normalizedEvolutionName || baseName === normalizedEvolutionName
+        })
+      : null
+
+  const targetPokemon = pokemonByDex || pokemonByName
+  if (targetPokemon) {
+    openDetails(targetPokemon)
+  }
 }
 
 const loadEvolutionSprites = async (pokemon) => {
@@ -600,7 +627,7 @@ const loadEvolutionSprites = async (pokemon) => {
         const id = Number(item?.id)
         const sprite = Number.isFinite(id) ? getOfficialArtworkUrl(id) : ''
         const name = await getFrenchSpeciesName(id, item?.name || '')
-        return { name, sprite }
+        return { name, sprite, dexNumber: Number.isFinite(id) ? id : null }
       })
     )
 
@@ -1552,7 +1579,13 @@ watch(
                   v-for="(evolution, spriteIndex) in selectedEvolutions"
                   :key="`${selectedPokemon._id}-evo-${evolution.name || spriteIndex}`"
                 >
-                  <div class="group30-evo" :title="formatEvolutionName(evolution.name)">
+                  <button
+                    type="button"
+                    class="group30-evo"
+                    :title="formatEvolutionName(evolution.name)"
+                    :aria-label="`Voir ${formatEvolutionName(evolution.name)}`"
+                    @click="openEvolutionDetails(evolution)"
+                  >
                     <img
                       class="group30-sprite"
                       :class="{
@@ -1564,7 +1597,7 @@ watch(
                       decoding="async"
                     />
                     <span class="group30-name">{{ formatEvolutionName(evolution.name) }}</span>
-                  </div>
+                  </button>
                   <span v-if="spriteIndex < selectedEvolutions.length - 1" class="group30-arrow" aria-hidden="true">
                     →
                   </span>
@@ -2580,6 +2613,16 @@ watch(
   position: relative;
   display: grid;
   place-items: center;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  border-radius: 10px;
+}
+
+.group30-evo:focus-visible {
+  outline: 2px solid rgba(17, 17, 17, 0.5);
+  outline-offset: 2px;
 }
 
 .group30-sprite {
@@ -2794,6 +2837,11 @@ watch(
 }
 
 .group30-evo:hover .group30-name {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.group30-evo:focus-visible .group30-name {
   opacity: 1;
   transform: translateX(-50%) translateY(0);
 }
