@@ -27,12 +27,13 @@ async function register({ username, password, role }) {
   }
 
   const hashed = await bcrypt.hash(password, 10);
+  const normalizedRole = role === "ADMIN" ? "ADMIN" : "USER";
 
-const user = await User.create({
-  username,
-  password: hashed,
-  role: "USER"
-});
+  const user = await User.create({
+    username,
+    password: hashed,
+    role: normalizedRole
+  });
 
   const token = signToken(user);
   return {

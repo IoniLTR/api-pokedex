@@ -1,8 +1,11 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import captureSfxUrl from '../assets/sounds/capture.mp3'
 import relacheSfxUrl from '../assets/sounds/relache.mp3'
 
+const router = useRouter()
+const route = useRoute()
 const pokemons = ref([])
 const loading = ref(true)
 const error = ref(null)
@@ -201,11 +204,15 @@ const availableRegions = computed(() => {
 })
 
 const filteredPokemons = computed(() => {
+  const nameFilter = normalizeToken(activeNameQuery.value)
   const typeFilter = selectedTypeFilter.value
   const regionFilter = selectedRegionFilter.value
   const favoritesOnly = showFavoritesOnly.value
 
   const filtered = pokemons.value.filter((pokemon) => {
+    const pokemonName = normalizeToken(pokemon?.name || '')
+    const matchesName = !nameFilter || pokemonName.includes(nameFilter)
+
     const pokemonTypes = Array.isArray(pokemon?.types) ? pokemon.types : []
     const matchesType =
       typeFilter === 'ALL' ||
@@ -220,7 +227,7 @@ const filteredPokemons = computed(() => {
 
     const matchesFavorite = !favoritesOnly || isFavorite(pokemon?._id)
 
-    return matchesType && matchesRegion && matchesFavorite
+    return matchesName && matchesType && matchesRegion && matchesFavorite
   })
 
   if (sortFilter.value === 'NAME_ASC') {
@@ -260,11 +267,13 @@ const filteredPokemons = computed(() => {
 
 const hasActiveFilters = computed(
   () =>
+    Boolean(activeNameQuery.value) ||
     selectedTypeFilter.value !== 'ALL' ||
     selectedRegionFilter.value !== 'ALL' ||
     showFavoritesOnly.value ||
     sortFilter.value !== 'DEFAULT'
 )
+const activeNameQuery = computed(() => String(route.query.q || '').trim())
 
 const getPrimaryType = (pokemon) => {
   const firstType = Array.isArray(pokemon?.types) ? pokemon.types[0] : ''
@@ -818,6 +827,9 @@ const toggleSearch = () => {
 }
 
 const resetFilters = () => {
+  const nextQuery = { ...route.query }
+  delete nextQuery.q
+  router.replace({ query: nextQuery })
   selectedTypeFilter.value = 'ALL'
   selectedRegionFilter.value = 'ALL'
   showFavoritesOnly.value = false
@@ -1324,7 +1336,7 @@ watch(
   min-height: 100vh;
   min-height: 100dvh;
   background: var(--mint-bg);
-  padding: 50px 100px;
+  padding: 20px 100px 50px;
   position: relative;
   overflow-x: clip;
 }
