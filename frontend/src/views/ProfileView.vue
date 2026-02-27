@@ -1441,9 +1441,12 @@ watch(
               <article
                 v-if="activeDetailSection === 'PROFILE'"
                 key="detail-profile"
-                class="detail-card detail-tab-panel"
+                class="detail-card detail-info-card detail-tab-panel"
               >
-                <h4>PROFIL</h4>
+                <div class="detail-card-head">
+                  <h4>PROFIL</h4>
+                  <span class="detail-dex-tag">{{ formatDexNumber(selectedPokemon) }}</span>
+                </div>
 
                 <div class="detail-type-row">
                   <span class="detail-type-pill" :style="{ '--type-pill-bg': selectedDetailTypeColor }">
@@ -1461,16 +1464,16 @@ watch(
 
                 <dl class="detail-kv-grid">
                   <div>
-                    <dt>POKEDEX</dt>
-                    <dd>{{ formatDexNumber(selectedPokemon) }}</dd>
-                  </div>
-                  <div>
                     <dt>TAILLE</dt>
                     <dd>{{ formatHeight(selectedPokemon.height) }}</dd>
                   </div>
                   <div>
                     <dt>POIDS</dt>
                     <dd>{{ formatWeight(selectedPokemon.weight) }}</dd>
+                  </div>
+                  <div>
+                    <dt>EXP. BASE</dt>
+                    <dd>{{ selectedBaseExperience }}</dd>
                   </div>
                   <div>
                     <dt>GENRE</dt>
@@ -1482,9 +1485,11 @@ watch(
               <article
                 v-else-if="activeDetailSection === 'ABILITIES'"
                 key="detail-abilities"
-                class="detail-card detail-tab-panel"
+                class="detail-card detail-info-card detail-tab-panel"
               >
-                <h4>TALENTS</h4>
+                <div class="detail-card-head">
+                  <h4>TALENTS</h4>
+                </div>
 
                 <ul class="detail-ability-list">
                   <li
@@ -1506,7 +1511,7 @@ watch(
               <article
                 v-else-if="activeDetailSection === 'STATS'"
                 key="detail-stats"
-                class="detail-card detail-tab-panel"
+                class="detail-card detail-info-card detail-tab-panel"
               >
                 <div class="detail-card-head">
                   <h4>STATS</h4>
@@ -1527,43 +1532,49 @@ watch(
                 </ul>
               </article>
 
-              <article v-else key="detail-origin" class="detail-card detail-tab-panel">
-                <h4>ORIGINE</h4>
+              <article v-else key="detail-origin" class="detail-card detail-info-card detail-tab-panel">
+                <div class="detail-card-head">
+                  <h4>ORIGINE</h4>
+                </div>
 
-                <article class="detail-card region-card">
-                  <img
-                    class="region-map-image"
-                    :src="getRegionImageUrl(selectedPokemon)"
-                    :alt="`Carte ${selectedRegionName}`"
-                    loading="lazy"
-                    decoding="async"
-                  />
-                  <span class="region-name">{{ selectedRegionName.toUpperCase() }}</span>
-                </article>
+                <div class="origin-layout">
+                  <article class="region-card">
+                    <img
+                      class="region-map-image"
+                      :src="getRegionImageUrl(selectedPokemon)"
+                      :alt="`Carte ${selectedRegionName}`"
+                      loading="lazy"
+                      decoding="async"
+                    />
+                    <span class="region-name">{{ selectedRegionName.toUpperCase() }}</span>
+                  </article>
 
-                <dl class="detail-kv-grid compact">
-                  <div>
-                    <dt>GENERATION</dt>
-                    <dd>{{ formatSlugLabel(selectedPokemon?.generation) }}</dd>
+                  <div class="origin-right">
+                    <dl class="detail-kv-grid compact">
+                      <div>
+                        <dt>GENERATION</dt>
+                        <dd>{{ formatSlugLabel(selectedPokemon?.generation) }}</dd>
+                      </div>
+                      <div>
+                        <dt>HABITAT</dt>
+                        <dd>{{ formatSlugLabel(selectedPokemon?.habitat) }}</dd>
+                        <div class="detail-flag-row" v-if="selectedMetaFlags?.length">
+                          <span v-for="flag in selectedMetaFlags" :key="`${selectedPokemon._id}-flag-${flag}`">
+                            {{ flag }}
+                          </span>
+                        </div>
+                      </div>
+                      <div>
+                        <dt>CROISSANCE</dt>
+                        <dd>{{ formatSlugLabel(selectedPokemon?.growthRate) }}</dd>
+                      </div>
+                      <div>
+                        <dt>CAPTURE</dt>
+                        <dd>{{ selectedCaptureRateLabel }}</dd>
+                      </div>
+                    </dl>
                   </div>
-                  <div>
-                    <dt>HABITAT</dt>
-                    <dd>{{ formatSlugLabel(selectedPokemon?.habitat) }}</dd>
-                    <div class="detail-flag-row" v-if="selectedMetaFlags?.length">
-                      <span v-for="flag in selectedMetaFlags" :key="`${selectedPokemon._id}-flag-${flag}`">
-                        {{ flag }}
-                      </span>
-                    </div>
-                  </div>
-                  <div>
-                    <dt>CROISSANCE</dt>
-                    <dd>{{ formatSlugLabel(selectedPokemon?.growthRate) }}</dd>
-                  </div>
-                  <div>
-                    <dt>CAPTURE</dt>
-                    <dd>{{ selectedCaptureRateLabel }}</dd>
-                  </div>
-                </dl>
+                </div>
               </article>
             </Transition>
 
@@ -1582,6 +1593,7 @@ watch(
                   >
                     <img
                       class="group30-sprite"
+                      :class="{ silhouette: shouldUseSilhouette(selectedPokemon?._id) }"
                       :src="evolution.sprite"
                       :alt="formatEvolutionName(evolution.name)"
                       loading="lazy"
@@ -2522,11 +2534,29 @@ watch(
 .region-card {
   position: relative;
   overflow: hidden;
-  min-height: 162px;
+  min-height: 74px;
   border-radius: 12px;
   background: rgba(255,255,255,0.05);
   border: 1px solid rgba(255,255,255,0.08);
   padding: 0;
+}
+
+.origin-layout {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+}
+
+.origin-layout .region-card {
+  flex: 0 0 44%;
+  min-height: 110px;
+}
+
+.origin-right {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 
 .region-map-image {

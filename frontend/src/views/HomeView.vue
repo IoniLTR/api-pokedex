@@ -2518,8 +2518,8 @@ watch(
 }
 
 .detail-kv-grid.compact {
-  gap: 4px 8px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px 30px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .detail-kv-grid div {
