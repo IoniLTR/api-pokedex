@@ -3,6 +3,11 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import captureSfxUrl from '../assets/sounds/capture.mp3'
 import relacheSfxUrl from '../assets/sounds/relache.mp3'
+import {
+  canUseFavorites,
+  loadFavoriteIdsForCurrentUser,
+  saveFavoriteIdsForCurrentUser
+} from '../services/favoritesService'
 
 const router = useRouter()
 const route = useRoute()
@@ -36,7 +41,6 @@ let favoriteCaptureSfx = null
 let favoriteReleaseSfx = null
 
 const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000'
-const FAVORITES_STORAGE_KEY = 'pokedex.favoriteIds'
 const FAVORITE_LAUNCH_MS = 1000
 const FAVORITE_REVEAL_DELAY_MS = 600
 const FAVORITE_SHAKE_MS = 1950
@@ -45,6 +49,8 @@ const FAVORITE_BURST_MS = 700
 const FAVORITE_CONCEAL_MS = 520
 const SEARCH_PAGE_SIZE = 100
 const favoriteCaptureTimers = new Map()
+let favoriteSyncRequestId = 0
+let favoritePersistRequestId = 0
 
 const TYPE_COLORS = {
   NORMAL: '#b8b99a',
@@ -865,11 +871,15 @@ const setFavoriteLaunchVector = (triggerElement) => {
 
 const toggleFavorite = (id, event) => {
   if (!id) return
+  if (!canUseFavorites()) {
+    router.push('/connexion')
+    return
+  }
+
   const normalizedId = String(id)
   if (isFavoriteAnimating(normalizedId)) return
 
-  const next = new Set(favoriteIds.value)
-  if (next.has(normalizedId)) {
+  if (favoriteIds.value.has(normalizedId)) {
     startFavoriteRelease(normalizedId)
   } else {
     startFavoriteCapture(normalizedId, event?.currentTarget)
@@ -949,7 +959,7 @@ const startFavoriteCapture = (id, triggerElement = null) => {
       const next = new Set(favoriteIds.value)
       next.add(normalizedId)
       favoriteIds.value = next
-      persistFavoriteIds()
+      void persistFavoriteIds()
       updateAnimatedSet(favoriteHiddenIds, normalizedId, false)
       updateAnimatedSet(favoriteBurstIds, normalizedId, true)
 
@@ -974,7 +984,7 @@ const startFavoriteRelease = (id) => {
     const next = new Set(favoriteIds.value)
     next.delete(normalizedId)
     favoriteIds.value = next
-    persistFavoriteIds()
+    void persistFavoriteIds()
     updateAnimatedSet(favoriteConcealIds, normalizedId, false)
     favoriteCaptureTimers.delete(normalizedId)
   }, FAVORITE_CONCEAL_MS)
@@ -982,29 +992,24 @@ const startFavoriteRelease = (id) => {
   registerFavoriteTimer(normalizedId, concealTimer)
 }
 
-const loadFavoriteIds = () => {
-  if (typeof window === 'undefined') return new Set()
+const loadFavoriteIds = async () => loadFavoriteIdsForCurrentUser()
 
-  try {
-    const raw = window.localStorage.getItem(FAVORITES_STORAGE_KEY)
-    if (!raw) return new Set()
-
-    const parsed = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return new Set()
-
-    return new Set(parsed.map((id) => String(id)).filter(Boolean))
-  } catch {
-    return new Set()
-  }
+const persistFavoriteIds = async () => {
+  const requestId = ++favoritePersistRequestId
+  const persisted = await saveFavoriteIdsForCurrentUser(favoriteIds.value)
+  if (requestId !== favoritePersistRequestId) return
+  favoriteIds.value = persisted
 }
 
-const persistFavoriteIds = () => {
-  if (typeof window === 'undefined') return
-  try {
-    window.localStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify([...favoriteIds.value]))
-  } catch {
-    // Ignore storage errors to keep UI functional.
-  }
+const syncFavoriteStateWithAuth = async () => {
+  const requestId = ++favoriteSyncRequestId
+  const loaded = await loadFavoriteIds()
+  if (requestId !== favoriteSyncRequestId) return
+  favoriteIds.value = loaded
+}
+
+const handleFavoriteStateSync = () => {
+  void syncFavoriteStateWithAuth()
 }
 
 const toggleSearch = () => {
@@ -1025,11 +1030,19 @@ onMounted(() => {
   descriptionSpeechSupported.value = supportsDescriptionSpeech()
   favoriteCaptureSfx = createFavoriteAudio(captureSfxUrl)
   favoriteReleaseSfx = createFavoriteAudio(relacheSfxUrl)
-  favoriteIds.value = loadFavoriteIds()
+  void syncFavoriteStateWithAuth()
+  if (typeof window !== 'undefined') {
+    window.addEventListener('storage', handleFavoriteStateSync)
+    window.addEventListener('focus', handleFavoriteStateSync)
+  }
   fetchPokemons()
 })
 
 onBeforeUnmount(() => {
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('storage', handleFavoriteStateSync)
+    window.removeEventListener('focus', handleFavoriteStateSync)
+  }
   stopCryPlayback()
   stopDescriptionPlayback()
   for (const audio of [favoriteCaptureSfx, favoriteReleaseSfx]) {
