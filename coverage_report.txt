@@ -1,0 +1,40 @@
+
+> pokedex-api@1.0.0 test
+> jest --runInBand --coverage
+
+------------------------|---------|----------|---------|---------|-------------------
+File                    | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s 
+------------------------|---------|----------|---------|---------|-------------------
+All files               |   14.87 |     0.75 |    1.98 |   16.49 |                   
+ src                    |     100 |      100 |     100 |     100 |                   
+  app.js                |     100 |      100 |     100 |     100 |                   
+  swagger.js            |     100 |      100 |     100 |     100 |                   
+ src/controllers        |   10.52 |        0 |       0 |   10.52 |                   
+  pkmnTypeController.js |      50 |      100 |       0 |      50 | 4-5               
+  pokemonController.js  |    5.71 |        0 |       0 |    5.71 | 4-82              
+  trainerController.js  |   11.11 |      100 |       0 |   11.11 | 4-40              
+  userController.js     |   10.52 |      100 |       0 |   10.52 | 4-43              
+ src/middlewares        |   45.83 |    28.57 |      40 |   47.61 |                   
+  auth.js               |   63.63 |    66.66 |     100 |   63.63 | 12-16             
+  errorHandler.js       |      25 |        0 |       0 |      25 | 2-5               
+  notFound.js           |      50 |      100 |       0 |      50 | 2                 
+  permission.js         |   28.57 |        0 |      50 |      25 | 2-4               
+ src/models             |   84.21 |        0 |       0 |   84.21 |                   
+  pkmnType.js           |     100 |      100 |     100 |     100 |                   
+  pokemon.js            |      70 |        0 |       0 |      70 | 56-71             
+  trainer.js            |     100 |      100 |     100 |     100 |                   
+  user.js               |     100 |      100 |     100 |     100 |                   
+ src/routes             |     100 |      100 |     100 |     100 |                   
+  index.js              |     100 |      100 |     100 |     100 |                   
+  pkmnRoutes.js         |     100 |      100 |     100 |     100 |                   
+  trainerRoutes.js      |     100 |      100 |     100 |     100 |                   
+  userRoutes.js         |     100 |      100 |     100 |     100 |                   
+ src/services           |    3.82 |        0 |       0 |    4.31 |                   
+  pkmnTypeService.js    |   66.66 |      100 |       0 |   66.66 | 5                 
+  pokemonService.js     |    1.62 |        0 |       0 |    1.87 | 7-476             
+  trainerService.js     |       8 |        0 |       0 |    8.33 | 6-81              
+  userService.js        |    7.14 |        0 |       0 |    7.89 | 8-142             
+ src/utils              |    3.82 |        0 |       0 |    4.54 |                   
+  pokepediaCry.js       |     2.7 |        0 |       0 |    3.12 | 7-354             
+  regionImages.js       |       8 |        0 |       0 |   10.52 | 2-24,67-104       
+------------------------|---------|----------|---------|---------|-------------------

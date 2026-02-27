@@ -43,232 +43,417 @@ onMounted(() => {
 </script>
 
 <template>
-  <main class="auth-screen">
-    <section class="auth-left">
-      <h1 class="left-title">CONNECTER<br />VOUS A VOTRE<br />POKEDEX</h1>
-
-      <svg class="left-mark" viewBox="0 0 205 205" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <path d="M64.1523 108.333C66.8482 127.179 83.0531 141.667 102.645 141.667C122.236 141.667 138.441 127.179 141.137 108.333H204.702C201.679 162.228 157.018 205 102.366 205C47.7147 205 3.05479 162.228 0.03125 108.333H64.1523ZM102.366 0C157.205 0 201.986 43.0655 204.733 97.2217H141.137C138.441 78.3761 122.236 63.8887 102.645 63.8887C83.0534 63.8887 66.8486 78.3761 64.1523 97.2217H0C2.74719 43.0656 47.5275 0.00023688 102.366 0Z" fill="white" fill-opacity="0.3"/>
-        <circle cx="102.644" cy="102.778" r="19.4445" fill="white" fill-opacity="0.3"/>
+  <main class="auth-page">
+    <!-- Background Pokéball decoration -->
+    <div class="auth-bg-balls" aria-hidden="true">
+      <svg class="auth-bg-ball ball-1" viewBox="0 0 160 160" fill="none">
+        <circle cx="80" cy="80" r="76" stroke="rgba(255,255,255,0.07)" stroke-width="2"/>
+        <circle cx="80" cy="80" r="22" fill="none" stroke="rgba(255,255,255,0.09)" stroke-width="2"/>
+        <path d="M4 80h152M80 4v152" stroke="rgba(255,255,255,0.05)" stroke-width="1.5" stroke-linecap="round"/>
       </svg>
+      <svg class="auth-bg-ball ball-2" viewBox="0 0 120 120" fill="none">
+        <circle cx="60" cy="60" r="56" stroke="rgba(255,255,255,0.06)" stroke-width="2"/>
+        <circle cx="60" cy="60" r="16" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="2"/>
+        <path d="M4 60h112M60 4v112" stroke="rgba(255,255,255,0.04)" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+    </div>
 
-      <RouterLink class="switch-btn" to="/inscription">INSCRIPTION</RouterLink>
-    </section>
+    <div class="auth-card">
+      <!-- Pokédex card top band -->
+      <div class="auth-card-top">
+        <div class="auth-card-leds" aria-hidden="true">
+          <span class="auth-led auth-led-blue"></span>
+          <span class="auth-led auth-led-red"></span>
+          <span class="auth-led auth-led-yellow"></span>
+          <span class="auth-led auth-led-green"></span>
+        </div>
+        <div class="auth-pokeball-icon" aria-hidden="true">
+          <svg viewBox="0 0 60 60" fill="none">
+            <circle cx="30" cy="30" r="28" fill="#ca072d" stroke="#333" stroke-width="1.5"/>
+            <path d="M2 30h56" stroke="#333" stroke-width="2"/>
+            <circle cx="30" cy="30" r="9" fill="white" stroke="#333" stroke-width="1.5"/>
+            <circle cx="30" cy="30" r="4" fill="#333"/>
+          </svg>
+        </div>
+      </div>
 
-    <section class="auth-right">
-      <div class="auth-panel">
-        <h2 class="right-title">CONNEXION</h2>
+      <!-- Screen area -->
+      <div class="auth-screen">
+        <h1 class="auth-title">CONNEXION</h1>
+        <p class="auth-subtitle">Accédez à votre Pokédex</p>
 
         <form class="auth-form" @submit.prevent="submitLogin" novalidate>
-          <label class="field">
-            <span>EMAIL</span>
+          <div class="auth-field">
+            <label class="auth-field-label" for="login-email">EMAIL / NOM</label>
             <input
+              id="login-email"
               v-model="email"
               type="text"
+              class="auth-input"
               autocomplete="username"
               autocapitalize="none"
               spellcheck="false"
               required
+              placeholder="Votre identifiant"
             />
-          </label>
+          </div>
 
-          <label class="field">
-            <span>MOT DE PASSE</span>
+          <div class="auth-field">
+            <label class="auth-field-label" for="login-password">MOT DE PASSE</label>
             <input
+              id="login-password"
               v-model="password"
               type="password"
+              class="auth-input"
               autocomplete="current-password"
               required
+              placeholder="••••••••"
             />
-          </label>
+          </div>
 
-          <p v-if="errorMessage" class="error-text">{{ errorMessage }}</p>
+          <Transition name="err-fade">
+            <p v-if="errorMessage" class="auth-error">
+              <svg viewBox="0 0 20 20" fill="currentColor" class="auth-error-icon" aria-hidden="true">
+                <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
+              </svg>
+              {{ errorMessage }}
+            </p>
+          </Transition>
 
-          <button class="submit-btn" type="submit" :disabled="!canSubmit">
-            {{ loading ? 'CONNEXION...' : 'SE CONNECTER' }}
+          <button class="auth-submit-btn" type="submit" :disabled="!canSubmit">
+            <span v-if="loading" class="auth-btn-spinner" aria-hidden="true"></span>
+            {{ loading ? 'CONNEXION…' : 'SE CONNECTER' }}
           </button>
         </form>
+
+        <div class="auth-switch">
+          <span>Pas encore de compte ?</span>
+          <RouterLink class="auth-switch-link" to="/inscription">INSCRIPTION</RouterLink>
+        </div>
       </div>
-    </section>
+    </div>
   </main>
 </template>
 
 <style scoped>
-.auth-screen {
+/* =============================================
+   AUTH PAGE – Kalos Pokédex Style
+   ============================================= */
+
+.auth-page {
   min-height: 100dvh;
-  width: min(100%, 1440px);
-  margin: 0 auto;
-  display: grid;
-  grid-template-columns: minmax(320px, 40%) minmax(420px, 60%);
-  background: #b4e7e3;
-}
-
-.auth-left {
-  background: #86c7e0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: space-between;
-  padding: clamp(20px, 3.4vh, 44px) clamp(14px, 2.2vw, 32px);
-}
-
-.left-title {
-  margin: 0;
-  text-align: center;
-  text-transform: uppercase;
-  line-height: 0.95;
-  letter-spacing: 0.04em;
-  color: #070e14;
-  font-family: 'Astra', 'Poppins', sans-serif;
-  font-size: clamp(1.35rem, 2.4vw, 2.35rem);
-}
-
-.left-mark {
-  width: min(70%, 280px);
-  height: auto;
-}
-
-.switch-btn {
-  width: min(100%, 350px);
-  min-height: clamp(50px, 6vh, 70px);
-  border-radius: 16px;
-  background: #ca1f3d;
-  color: #f4f6f9;
-  text-decoration: none;
-  display: grid;
-  place-items: center;
-  font-family: 'Astra', 'Poppins', sans-serif;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  font-size: clamp(1.05rem, 1.45vw, 1.55rem);
-}
-
-.auth-right {
-  border-top-left-radius: 24px;
-  border-bottom-left-radius: 24px;
-  background: #b4e7e3;
-  padding: clamp(22px, 3.6vh, 42px) clamp(16px, 2.8vw, 40px);
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: clamp(20px, 4vw, 60px) clamp(16px, 3vw, 40px);
+  position: relative;
+  overflow: hidden;
 }
 
-.auth-panel {
-  width: min(100%, 620px);
+/* Decorative pokéballs */
+.auth-bg-balls {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.auth-bg-ball {
+  position: absolute;
+  opacity: 1;
+}
+
+.ball-1 {
+  width: clamp(200px, 40vw, 500px);
+  bottom: -80px;
+  right: -80px;
+  animation: ball-float 8s ease-in-out infinite;
+}
+
+.ball-2 {
+  width: clamp(140px, 25vw, 340px);
+  top: -60px;
+  left: -60px;
+  animation: ball-float 10s ease-in-out infinite reverse;
+}
+
+@keyframes ball-float {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-20px) rotate(5deg); }
+}
+
+/* === CARD === */
+.auth-card {
+  width: min(100%, 460px);
+  border-radius: 24px;
+  overflow: hidden;
+  box-shadow: 0 24px 64px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.06);
+  animation: card-enter 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+@keyframes card-enter {
+  from {
+    opacity: 0;
+    transform: translateY(24px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Card top red band */
+.auth-card-top {
+  background: linear-gradient(135deg, #b81425 0%, #c92030 50%, #a8101e 100%);
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: relative;
+  overflow: hidden;
+}
+
+.auth-card-top::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: url("data:image/svg+xml,%3Csvg width='40' height='40' viewBox='0 0 40 40' xmlns='http://www.w3.org/2000/svg'%3E%3Ccircle cx='20' cy='20' r='14' fill='none' stroke='rgba(255,255,255,0.07)' stroke-width='1'/%3E%3C/svg%3E") repeat;
+  background-size: 40px 40px;
+  pointer-events: none;
+}
+
+.auth-card-top::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 50%;
+  background: linear-gradient(180deg, rgba(255,255,255,0.14) 0%, transparent 100%);
+  pointer-events: none;
+}
+
+.auth-card-leds {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  position: relative;
+  z-index: 1;
+}
+
+.auth-led {
+  display: block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  box-shadow: 0 0 6px currentColor;
+}
+
+.auth-led-blue   { background: #60c8f0; color: #60c8f0; width: 20px; height: 20px; }
+.auth-led-red    { background: #ff4060; color: #ff4060; }
+.auth-led-yellow { background: #ffd040; color: #ffd040; }
+.auth-led-green  { background: #40e080; color: #40e080; }
+
+.auth-pokeball-icon {
+  width: 44px;
+  height: 44px;
+  position: relative;
+  z-index: 1;
+  filter: drop-shadow(0 2px 6px rgba(0,0,0,0.5));
+  animation: pokeball-spin 8s linear infinite;
+}
+
+@keyframes pokeball-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* === SCREEN === */
+.auth-screen {
+  background: linear-gradient(160deg, #0d0e13 0%, #111318 100%);
+  padding: clamp(24px, 4vh, 40px) clamp(20px, 4vw, 36px);
+  border-top: 1px solid rgba(255,255,255,0.06);
   display: grid;
-  gap: clamp(14px, 2vh, 24px);
+  gap: clamp(16px, 2.5vh, 24px);
 }
 
-.right-title {
+.auth-title {
   margin: 0;
-  text-align: center;
-  color: #070e14;
-  font-family: 'Astra', 'Poppins', sans-serif;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  font-size: clamp(1.45rem, 2.2vw, 2.45rem);
+  font-family: 'Rajdhani', 'Poppins', sans-serif;
+  font-size: clamp(1.6rem, 3.5vw, 2.2rem);
+  font-weight: 700;
+  color: #e8f4ff;
+  letter-spacing: 0.06em;
+  line-height: 1;
 }
 
+.auth-subtitle {
+  margin: -8px 0 0;
+  color: rgba(180, 210, 240, 0.55);
+  font-size: 0.85rem;
+}
+
+/* Form */
 .auth-form {
   display: grid;
-  gap: clamp(12px, 1.4vh, 18px);
+  gap: clamp(12px, 2vh, 18px);
 }
 
-.field {
+.auth-field {
   display: grid;
-  gap: 10px;
+  gap: 7px;
 }
 
-.field span {
-  color: #070e14;
-  font-family: 'Astra', 'Poppins', sans-serif;
+.auth-field-label {
+  font-family: 'Rajdhani', 'Poppins', sans-serif;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: rgba(140, 200, 240, 0.8);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  font-size: clamp(0.95rem, 1.25vw, 1.3rem);
 }
 
-.field input {
+.auth-input {
   width: 100%;
-  min-height: clamp(50px, 5.6vh, 68px);
+  min-height: clamp(46px, 5.5vh, 58px);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 12px;
+  background: rgba(255,255,255,0.06);
+  padding: 0 16px;
+  color: #e8f4ff;
+  font-size: 0.92rem;
+  font-family: 'Poppins', sans-serif;
+  outline: none;
+  transition: border-color 200ms ease, background-color 200ms ease, box-shadow 200ms ease;
+}
+
+.auth-input::placeholder {
+  color: rgba(160,200,240,0.3);
+}
+
+.auth-input:focus {
+  border-color: rgba(100, 180, 240, 0.55);
+  background: rgba(255,255,255,0.09);
+  box-shadow: 0 0 0 3px rgba(60, 160, 240, 0.18);
+}
+
+/* Error */
+.auth-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: rgba(200, 30, 50, 0.18);
+  border: 1px solid rgba(200,30,50,0.35);
+  color: #ff8090;
+  font-size: 0.88rem;
+}
+
+.auth-error-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.err-fade-enter-active, .err-fade-leave-active {
+  transition: opacity 220ms ease, transform 220ms ease;
+}
+.err-fade-enter-from, .err-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+/* Submit button */
+.auth-submit-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  min-height: clamp(48px, 6vh, 60px);
   border: 0;
   border-radius: 14px;
-  background: #86c7e0;
-  padding: 0 14px;
-  color: #0c2130;
-  font-size: 0.92rem;
-  font-family: 'Poppins', 'Segoe UI', sans-serif;
-  outline: none;
-}
-
-.field input:focus {
-  box-shadow: 0 0 0 3px rgba(34, 103, 129, 0.3);
-}
-
-.error-text {
-  margin: 0;
-  color: #a0132c;
-  font-size: 0.95rem;
-  font-weight: 600;
-}
-
-.submit-btn {
-  margin: clamp(8px, 1.3vh, 12px) auto 0;
-  width: min(100%, 360px);
-  min-height: clamp(52px, 5.9vh, 72px);
-  border: 0;
-  border-radius: 16px;
-  background: #ca1f3d;
-  color: #f6f7f8;
-  font-family: 'Astra', 'Poppins', sans-serif;
+  background: linear-gradient(135deg, #c92030 0%, #e03550 100%);
+  color: #fff;
+  font-family: 'Rajdhani', 'Poppins', sans-serif;
+  font-size: clamp(1rem, 1.6vw, 1.2rem);
+  font-weight: 700;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  font-size: clamp(1.08rem, 1.5vw, 1.62rem);
   cursor: pointer;
+  box-shadow: 0 4px 20px rgba(200, 30, 48, 0.4), inset 0 1px 0 rgba(255,255,255,0.2);
+  transition: transform 160ms ease, box-shadow 200ms ease, background 200ms ease;
+  position: relative;
+  overflow: hidden;
+  margin-top: clamp(4px, 1vh, 8px);
 }
 
-.submit-btn:disabled {
-  opacity: 0.55;
+.auth-submit-btn::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 50%;
+  background: linear-gradient(180deg, rgba(255,255,255,0.15) 0%, transparent 100%);
+  border-radius: 14px 14px 0 0;
+  pointer-events: none;
+}
+
+.auth-submit-btn:not(:disabled):hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 28px rgba(200, 30, 48, 0.55), inset 0 1px 0 rgba(255,255,255,0.2);
+  background: linear-gradient(135deg, #d92838 0%, #f04060 100%);
+}
+
+.auth-submit-btn:not(:disabled):active {
+  transform: translateY(0) scale(0.98);
+}
+
+.auth-submit-btn:disabled {
+  opacity: 0.45;
   cursor: not-allowed;
 }
 
-@media (max-width: 1024px) {
-  .auth-screen {
-    grid-template-columns: 1fr;
-  }
-
-  .auth-right {
-    border-radius: 0;
-  }
-
-  .auth-left {
-    order: 2;
-    gap: 22px;
-  }
-
-  .left-mark {
-    width: min(56%, 300px);
-  }
+.auth-btn-spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255,255,255,0.35);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
 }
 
-@media (max-width: 760px) {
-  .auth-right {
-    padding: 26px 16px;
-  }
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
 
-  .auth-left {
-    padding: 26px 16px;
-  }
+/* Switch link */
+.auth-switch {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: rgba(160,200,240,0.5);
+  font-size: 0.82rem;
+}
 
-  .field input {
-    min-height: 64px;
+.auth-switch-link {
+  color: #73a8f4;
+  text-decoration: none;
+  font-family: 'Rajdhani', 'Poppins', sans-serif;
+  font-weight: 700;
+  font-size: 0.85rem;
+  letter-spacing: 0.06em;
+  transition: color 180ms ease;
+}
+
+.auth-switch-link:hover {
+  color: #9fc4ff;
+}
+
+@media (max-width: 480px) {
+  .auth-card {
     border-radius: 18px;
-  }
-
-  .submit-btn,
-  .switch-btn {
-    min-height: 62px;
-    border-radius: 18px;
-    font-size: 1.2rem;
   }
 }
 </style>

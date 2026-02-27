@@ -49,21 +49,33 @@ watch(
   left: 14px;
   width: 48px;
   aspect-ratio: 1 / 1;
-  border: 0;
-  border-radius: 999px;
-  background: #ca072d;
+  border: 1px solid rgba(200, 25, 45, 0.5);
+  border-radius: 14px;
+  background: linear-gradient(135deg, #c92030 0%, #a81020 100%);
+  box-shadow: 0 6px 20px rgba(180, 10, 30, 0.4), inset 0 1px 0 rgba(255,255,255,0.18);
   color: #ffffff;
   display: grid;
   place-items: center;
-  box-shadow: 0 10px 16px rgba(103, 7, 33, 0.32);
   cursor: pointer;
   z-index: 120;
-  transition: transform 150ms ease, background-color 150ms ease;
+  transition: transform 150ms ease, box-shadow 200ms ease;
+}
+
+.back-home-btn::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 50%;
+  background: linear-gradient(180deg, rgba(255,255,255,0.16) 0%, transparent 100%);
+  border-radius: 14px 14px 0 0;
+  pointer-events: none;
 }
 
 .back-home-btn:hover,
 .back-home-btn:focus-visible {
-  background: #dd1238;
+  transform: translateY(-2px);
+  box-shadow: 0 10px 28px rgba(180, 10, 30, 0.55), inset 0 1px 0 rgba(255,255,255,0.2);
+  outline: none;
 }
 
 .back-home-btn:active {
@@ -71,12 +83,14 @@ watch(
 }
 
 .back-home-btn svg {
-  width: 24px;
-  height: 24px;
+  width: 22px;
+  height: 22px;
   stroke: currentColor;
-  stroke-width: 2.3;
+  stroke-width: 2.2;
   stroke-linecap: round;
   stroke-linejoin: round;
+  position: relative;
+  z-index: 1;
 }
 
 @media (max-width: 760px) {
@@ -89,6 +103,18 @@ watch(
   .back-home-btn svg {
     width: 21px;
     height: 21px;
+  }
+
+  body.detail-panel-open .app-header,
+  body.detail-panel-open .back-home-btn {
+    opacity: 0;
+    pointer-events: none !important;
+    transform: translateY(-20px);
+  }
+
+  body.detail-panel-open .app-header *,
+  body.detail-panel-open .back-home-btn * {
+    pointer-events: none !important;
   }
 }
 </style>

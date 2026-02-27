@@ -6,6 +6,46 @@
 
 :root {
   height: 100%;
+
+  /* === Kalos Pokédex Colors === */
+  --clr-pokedex-red: #c92030;
+  --clr-pokedex-red-dark: #9a1020;
+  --clr-pokedex-red-light: #e03048;
+  --clr-screen-blue: rgba(120, 200, 240, 0.18);
+  --clr-screen-blue-border: rgba(140, 220, 255, 0.35);
+  --clr-bg-dark: #0c0d12;
+  --clr-bg-mid: #111318;
+
+  /* === Liquid Glass === */
+  --glass-bg: rgba(255, 255, 255, 0.07);
+  --glass-bg-strong: rgba(255, 255, 255, 0.12);
+  --glass-border: rgba(255, 255, 255, 0.18);
+  --glass-border-strong: rgba(255, 255, 255, 0.3);
+  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  --glass-blur: blur(18px) saturate(1.6);
+
+  /* === Type colors (global) === */
+  --type-normal: #9aa09b;
+  --type-fire: #f08a45;
+  --type-water: #73a0f4;
+  --type-electric: #f3d660;
+  --type-grass: #6fca6b;
+  --type-ice: #8fd8d8;
+  --type-fighting: #ce5b5b;
+  --type-poison: #ad75d8;
+  --type-ground: #d8be7a;
+  --type-flying: #9eb2ee;
+  --type-psychic: #f487ad;
+  --type-bug: #92c062;
+  --type-rock: #c5ad70;
+  --type-ghost: #7f77c8;
+  --type-dragon: #6f7ed8;
+  --type-dark: #8d766b;
+  --type-steel: #aab7cc;
+  --type-fairy: #e3a9cf;
+
+  /* === Pokéball background pattern === */
+  --pokeball-bg: url("data:image/svg+xml,%3Csvg width='80' height='80' viewBox='0 0 80 80' xmlns='http://www.w3.org/2000/svg'%3E%3Ccircle cx='40' cy='40' r='26' fill='none' stroke='rgba(255,255,255,0.045)' stroke-width='2'/%3E%3CPath d='M14 40h52M40 14v52' stroke='rgba(255,255,255,0.035)' stroke-width='1.5' stroke-linecap='round'/%3E%3Ccircle cx='40' cy='40' r='7' fill='none' stroke='rgba(255,255,255,0.055)' stroke-width='1.5'/%3E%3C/svg%3E");
 }
 
 html,
@@ -19,11 +59,35 @@ body,
 }
 
 body {
-  background: #b4e7e3;
+  background-color: var(--clr-bg-dark);
+  background-image: var(--pokeball-bg);
+  background-repeat: repeat;
+  background-size: 80px 80px;
+  background-attachment: fixed;
   line-height: 1.4;
   font-family: 'Poppins', 'Segoe UI', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
   overflow-x: hidden;
+  color: #e8eaf0;
+}
+
+/* === Custom Scrollbar === */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--clr-pokedex-red);
+  border-radius: 99px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--clr-pokedex-red-light);
 }

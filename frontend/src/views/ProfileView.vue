@@ -1,4 +1,5 @@
 <script setup>
+import IconSprites from '../components/IconSprites.vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import captureSfxUrl from '../assets/sounds/capture.mp3'
@@ -78,6 +79,35 @@ const TYPE_LABELS_FR = {
   DARK: 'TENEBRES',
   STEEL: 'ACIER',
   FAIRY: 'FEE'
+}
+
+const ENERGY_SUPPORTED_TYPES = new Set([
+  'GRASS', 'FIRE', 'WATER', 'FIGHTING', 'NORMAL', 'STEEL',
+  'ELECTRIC', 'PSYCHIC', 'DARK', 'DRAGON', 'FAIRY'
+])
+
+const ENERGY_TYPE_ALIASES = {
+  BUG: 'GRASS',
+  ICE: 'WATER',
+  POISON: 'PSYCHIC',
+  ROCK: 'FIGHTING',
+  GHOST: 'DARK',
+  FLYING: 'NORMAL',
+  GROUND: 'FIGHTING'
+}
+
+const ENERGY_ICON_SPRITES = {
+  WATER: { id: 'energy-water', viewBox: '0 0 192 203' },
+  FIRE: { id: 'energy-fire', viewBox: '0 0 229 239' },
+  GRASS: { id: 'energy-grass', viewBox: '0 0 216 242' },
+  FIGHTING: { id: 'energy-fighting', viewBox: '0 0 201 220' },
+  STEEL: { id: 'energy-steel', viewBox: '0 0 238 208' },
+  ELECTRIC: { id: 'energy-electric', viewBox: '0 0 167 236' },
+  PSYCHIC: { id: 'energy-psychic', viewBox: '0 0 250 184' },
+  DARK: { id: 'energy-dark', viewBox: '0 0 226 196' },
+  DRAGON: { id: 'energy-dragon', viewBox: '0 0 217 223' },
+  FAIRY: { id: 'energy-fairy', viewBox: '0 0 223 213' },
+  NORMAL: { id: 'energy-normal', viewBox: '0 0 206 232' }
 }
 
 const authToken = ref('')
@@ -164,6 +194,20 @@ const getPrimaryType = (pokemon) => {
   return getCanonicalType(firstType)
 }
 const getCardColor = (pokemon) => TYPE_COLORS[getPrimaryType(pokemon)] || '#47586b'
+
+const getEnergyType = (pokemon) => {
+  const primaryType = getPrimaryType(pokemon)
+  const normalized = ENERGY_TYPE_ALIASES[primaryType] || primaryType
+  return ENERGY_SUPPORTED_TYPES.has(normalized) ? normalized : 'NORMAL'
+}
+
+const getEnergyIconSprite = (pokemon) => {
+  const energyType = getEnergyType(pokemon)
+  return ENERGY_ICON_SPRITES[energyType] || ENERGY_ICON_SPRITES.NORMAL
+}
+
+const getEnergyIconId = (pokemon) => getEnergyIconSprite(pokemon).id
+const getEnergyIconViewBox = (pokemon) => getEnergyIconSprite(pokemon).viewBox
 const getTypeLabel = (type) => TYPE_LABELS_FR[type] || type || 'INCONNU'
 const formatSlugLabel = (value) => {
   const text = String(value || '')
@@ -623,6 +667,101 @@ const favoritePokemons = computed(() => {
     .filter(Boolean)
 })
 
+// ─── Filter state ─────────────────────────────────────────────────
+const profileSearchOpen = ref(false)
+const profileSearchName = ref('')
+const profileFilterType = ref('ALL')
+const profileFilterRegion = ref('ALL')
+const profileSortBy = ref('DEFAULT')
+
+const getSortablePokemonName = (pokemon) => {
+  const display = String(pokemon?.displayName || '').trim()
+  if (display) return display
+  return String(pokemon?.name || '').trim()
+}
+
+const isProfileFilterActive = computed(() =>
+  Boolean(profileSearchName.value) ||
+  profileFilterType.value !== 'ALL' ||
+  profileFilterRegion.value !== 'ALL' ||
+  profileSortBy.value !== 'DEFAULT'
+)
+
+const favoritesSearchIndex = computed(() =>
+  favoritePokemons.value.map((pokemon) => {
+    const sortableName = getSortablePokemonName(pokemon)
+    const normalizedName = normalizeToken(sortableName || pokemon?.name || '')
+    const normalizedRegion = normalizeToken(pokemon?.regions?.[0]?.regionName || '')
+    const canonicalTypes = (Array.isArray(pokemon?.types) ? pokemon.types : [])
+      .map((type) => getCanonicalType(type))
+      .filter(Boolean)
+    const dexValue = Number(pokemon?.regions?.[0]?.regionPokedexNumber)
+    const dexAsc = Number.isFinite(dexValue) ? dexValue : Number.POSITIVE_INFINITY
+    const dexDesc = Number.isFinite(dexValue) ? dexValue : Number.NEGATIVE_INFINITY
+
+    return { pokemon, sortableName, normalizedName, normalizedRegion, canonicalTypes, dexAsc, dexDesc }
+  })
+)
+
+const profileAvailableTypes = computed(() => {
+  const knownTypes = new Set()
+  for (const entry of favoritesSearchIndex.value) {
+    for (const type of entry.canonicalTypes) {
+      if (type) knownTypes.add(type)
+    }
+  }
+  return [...knownTypes].sort((a, b) => getTypeLabel(a).localeCompare(getTypeLabel(b), 'fr', { sensitivity: 'base' }))
+})
+
+const profileAvailableRegions = computed(() => {
+  const knownRegions = new Map()
+  for (const pokemon of favoritePokemons.value) {
+    const rawRegion = String(pokemon?.regions?.[0]?.regionName || '').trim()
+    if (!rawRegion) continue
+    const key = normalizeToken(rawRegion)
+    if (!key || knownRegions.has(key)) continue
+    knownRegions.set(key, rawRegion.toUpperCase())
+  }
+  return [...knownRegions.entries()]
+    .sort((a, b) => a[1].localeCompare(b[1], 'fr', { sensitivity: 'base' }))
+    .map(([value, label]) => ({ value, label }))
+})
+
+const filteredFavoritePokemons = computed(() => {
+  const nameFilter = normalizeToken(profileSearchName.value)
+  const typeFilter = profileFilterType.value
+  const regionFilter = profileFilterRegion.value
+
+  const entries = favoritesSearchIndex.value.filter((entry) => {
+    const matchesName = !nameFilter || entry.normalizedName.includes(nameFilter)
+    const matchesType = typeFilter === 'ALL' || entry.canonicalTypes.includes(typeFilter)
+    const matchesRegion = regionFilter === 'ALL' || entry.normalizedRegion === regionFilter
+    return matchesName && matchesType && matchesRegion
+  })
+
+  if (profileSortBy.value === 'NAME_ASC') {
+    return [...entries].sort((a, b) => a.sortableName.localeCompare(b.sortableName, 'fr', { sensitivity: 'base' })).map((e) => e.pokemon)
+  }
+  if (profileSortBy.value === 'NAME_DESC') {
+    return [...entries].sort((a, b) => b.sortableName.localeCompare(a.sortableName, 'fr', { sensitivity: 'base' })).map((e) => e.pokemon)
+  }
+  if (profileSortBy.value === 'DEX_ASC') {
+    return [...entries].sort((a, b) => a.dexAsc - b.dexAsc).map((e) => e.pokemon)
+  }
+  if (profileSortBy.value === 'DEX_DESC') {
+    return [...entries].sort((a, b) => b.dexDesc - a.dexDesc).map((e) => e.pokemon)
+  }
+
+  return entries.map((e) => e.pokemon)
+})
+
+const resetProfileFilters = () => {
+  profileSearchName.value = ''
+  profileFilterType.value = 'ALL'
+  profileFilterRegion.value = 'ALL'
+  profileSortBy.value = 'DEFAULT'
+}
+
 const syncAuthState = async () => {
   authToken.value = getStoredAuthToken()
   authUser.value = getStoredAuthUser()
@@ -901,6 +1040,7 @@ onBeforeUnmount(() => {
     window.removeEventListener('storage', handleAuthStateSync)
     window.removeEventListener('focus', handleAuthStateSync)
   }
+  document.body.classList.remove('detail-panel-open')
   stopCryPlayback()
   stopDescriptionPlayback()
   for (const audio of [favoriteCaptureSfx, favoriteReleaseSfx]) {
@@ -930,10 +1070,12 @@ watch(
     }
 
     if (!pokemon) {
+      document.body.classList.remove('detail-panel-open')
       selectedEvolutions.value = []
       return
     }
 
+    document.body.classList.add('detail-panel-open')
     await loadEvolutionSprites(pokemon)
   },
   { immediate: true }
@@ -942,31 +1084,7 @@ watch(
 
 <template>
   <main class="profile-page">
-    <svg class="icon-sprite-defs" aria-hidden="true" focusable="false">
-      <defs>
-        <symbol id="icon-pokeball-open" viewBox="0 0 60 61">
-          <path d="M6.5 22.2C6.5 11.9 16.9 4.5 30 4.5C43.1 4.5 53.5 11.9 53.5 22.2C53.5 24.6 52.5 26.8 50.8 28.6C46.5 33 38.8 35.1 30 35.1C21.2 35.1 13.5 33 9.2 28.6C7.5 26.8 6.5 24.6 6.5 22.2Z" fill="#ff321e" stroke="#16181d" stroke-width="2"/>
-          <path d="M7.9 25.6C12.6 23.5 20.6 22.2 30 22.2C39.4 22.2 47.4 23.5 52.1 25.6C51.2 29.6 47.8 32.7 42.8 34.5H17.2C12.2 32.7 8.8 29.6 7.9 25.6Z" fill="#cf1416" stroke="#16181d" stroke-width="1.3"/>
-          <circle cx="30" cy="20.6" r="5.7" fill="#16181d"/>
-          <circle cx="30" cy="20.6" r="3.8" fill="#f6f6f6" stroke="#16181d" stroke-width="1.1"/>
-          <circle cx="30" cy="20.6" r="1.9" fill="#fefefe"/>
-          <path d="M12.1 16.9C13.5 12.9 17.8 10.2 23 9" stroke="#fff2ef" stroke-width="1.5" stroke-linecap="round"/>
-          <path d="M10.4 20.8C10.8 19.6 11.2 18.7 11.9 17.7" stroke="#fff2ef" stroke-width="1.5" stroke-linecap="round"/>
-          <path d="M6.8 39.1C10.2 34.8 18.7 32.1 30 32.1C41.3 32.1 49.8 34.8 53.2 39.1C50 42.5 41.5 44.7 30 44.7C18.5 44.7 10 42.5 6.8 39.1Z" fill="#16181d"/>
-          <path d="M9 39.6C9 50.6 18 57 30 57C42 57 51 50.6 51 39.6C47.8 42 40 43.8 30 43.8C20 43.8 12.2 42 9 39.6Z" fill="#f8f8f8" stroke="#16181d" stroke-width="1.8"/>
-          <path d="M24.4 45.2C24.4 42.1 26.9 39.6 30 39.6C33.1 39.6 35.6 42.1 35.6 45.2V45.4H24.4V45.2Z" fill="#d8d8dd"/>
-          <path d="M39.1 53.8C41.4 53.4 43.2 52.7 44.8 51.6" stroke="#d1d1d1" stroke-width="1.2" stroke-linecap="round"/>
-          <path d="M36.2 54.2C37 54.2 37.9 54.1 38.7 54" stroke="#d1d1d1" stroke-width="1.2" stroke-linecap="round"/>
-        </symbol>
-        <symbol id="icon-pokeball-closed" viewBox="0 0 60 61">
-          <circle cx="30" cy="30.5" r="27" fill="#ffffff" stroke="#111111" stroke-width="2"/>
-          <path d="M4 30.5C4 16.1406 15.6406 4.5 30 4.5C44.3594 4.5 56 16.1406 56 30.5H4Z" fill="#ef4444"/>
-          <path d="M3 30.5H57" stroke="#111111" stroke-width="2.5"/>
-          <circle cx="30" cy="30.5" r="7.2" fill="#ffffff" stroke="#111111" stroke-width="2"/>
-          <circle cx="30" cy="30.5" r="3.1" fill="#111111"/>
-        </symbol>
-      </defs>
-    </svg>
+    <IconSprites />
 
     <section class="profile-left">
       <div class="profile-user-block">
@@ -983,104 +1101,191 @@ watch(
     </section>
 
     <section class="profile-right">
-      <h2 class="favorites-title">VOS FAVORIS</h2>
+      <div class="profile-content-layout" :class="{ 'with-detail': selectedPokemon }">
+        <div class="profile-favorites-area">
+          <h2 class="favorites-title">VOS CAPTURES</h2>
 
-      <div v-if="loading" class="profile-state">Chargement de vos favoris...</div>
-      <div v-else-if="error" class="profile-state error">{{ error }}</div>
-      <div v-else-if="!favoritePokemons.length" class="profile-state">
-        Aucun pokemon en favoris.
-      </div>
+          <div v-if="loading" class="profile-state">Chargement de vos captures...</div>
+          <div v-else-if="error" class="profile-state error">{{ error }}</div>
+          <div v-else-if="!favoritePokemons.length" class="profile-state">
+            Aucun pokemon capturés.
+          </div>
+          <div v-else-if="!filteredFavoritePokemons.length" class="profile-state">
+            Aucun résultat pour ces filtres.
+          </div>
 
-      <div v-else class="favorites-grid">
-        <article
-          v-for="pokemon in favoritePokemons"
-          :key="pokemon._id"
-          class="favorite-card"
-          :style="{ '--card-bg': getCardColor(pokemon) }"
-          role="button"
-          tabindex="0"
-          @click="openDetails(pokemon)"
-          @keydown.enter.prevent="openDetails(pokemon)"
-          @keydown.space.prevent="openDetails(pokemon)"
+          <div v-else class="favorites-grid">
+            <article
+              v-for="pokemon in filteredFavoritePokemons"
+              :key="pokemon._id"
+              class="favorite-card"
+              :style="{ '--card-bg': getCardColor(pokemon) }"
+              role="button"
+              tabindex="0"
+              @click="openDetails(pokemon)"
+              @keydown.enter.prevent="openDetails(pokemon)"
+              @keydown.space.prevent="openDetails(pokemon)"
+            >
+              <svg
+                class="card-energy-mark"
+                :viewBox="getEnergyIconViewBox(pokemon)"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+                aria-hidden="true"
+              >
+                <use :href="'#' + getEnergyIconId(pokemon)" />
+              </svg>
+
+              <h3 class="card-name">{{ formatPokemonDisplayName(getDisplayName(pokemon), 'INCONNU') }}</h3>
+
+              <button
+                type="button"
+                class="card-favorite-btn"
+                :class="{
+                  active: isFavorite(pokemon._id),
+                  'is-launching': isFavoriteLaunching(pokemon._id),
+                  'is-catching': isFavoriteShaking(pokemon._id),
+                  'is-bursting': isFavoriteBursting(pokemon._id),
+                  'is-releasing': isFavoriteConcealing(pokemon._id)
+                }"
+                :aria-label="
+                  isFavoriteAnimating(pokemon._id)
+                    ? 'Animation en cours'
+                    : isFavorite(pokemon._id)
+                      ? 'Retirer des favoris'
+                      : 'Ajouter aux favoris'
+                "
+                @click.stop="toggleFavorite(pokemon._id, $event)"
+              >
+                <span class="pokeball-burst" aria-hidden="true"></span>
+                <svg
+                  v-if="!isFavoriteBallClosed(pokemon._id)"
+                  class="favorite-icon open-pokeball-icon"
+                  width="60"
+                  height="61"
+                  viewBox="0 0 60 61"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                  aria-hidden="true"
+                >
+                  <use href="#icon-pokeball-open" />
+                </svg>
+                <svg
+                  v-else
+                  class="favorite-icon pokeball-icon"
+                  width="60"
+                  height="61"
+                  viewBox="0 0 60 61"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                  aria-hidden="true"
+                >
+                  <use href="#icon-pokeball-closed" />
+                </svg>
+              </button>
+
+              <img
+                class="card-image"
+                :class="{
+                  silhouette: shouldUseSilhouette(pokemon._id),
+                  revealing: isFavoriteRevealing(pokemon._id),
+                  'capture-hidden': isFavoriteHidden(pokemon._id)
+                }"
+                :src="pokemon.imgUrl"
+                :alt="getDisplayName(pokemon) || 'Pokemon'"
+                loading="lazy"
+                decoding="async"
+              />
+              <img
+                v-if="isFavoriteConcealing(pokemon._id)"
+                class="card-image-conceal"
+                :src="pokemon.imgUrl"
+                :alt="''"
+                loading="lazy"
+                decoding="async"
+                aria-hidden="true"
+              />
+            </article>
+          </div>
+        </div><!-- /profile-favorites-area -->
+
+        <!-- Filter FAB -->
+        <button
+          type="button"
+          class="profile-filter-fab"
+          :class="{ active: profileSearchOpen }"
+          @click="profileSearchOpen = !profileSearchOpen"
+          :aria-label="profileSearchOpen ? 'Fermer les filtres' : 'Ouvrir les filtres'"
         >
-          <svg class="card-pokeball-mark" viewBox="0 0 162 162" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-            <path d="M50.5977 85.4453C52.7241 100.309 65.5053 111.735 80.957 111.735C96.4091 111.735 109.191 100.309 111.317 85.4453H161.452C159.067 127.953 123.843 161.688 80.7383 161.688C37.6338 161.688 2.41053 127.953 0.0253906 85.4453H50.5977ZM80.7383 0C123.991 0 159.311 33.9671 161.478 76.6816H111.317C109.191 61.8173 96.4093 50.3906 80.957 50.3906C65.5051 50.391 52.7239 61.8176 50.5977 76.6816H0C2.16635 33.9672 37.4855 0.000197082 80.7383 0Z" fill="white" fill-opacity="0.26"/>
-            <circle cx="80.9579" cy="81.0632" r="15.3363" fill="white" fill-opacity="0.26"/>
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path
+              v-if="!profileSearchOpen"
+              d="M4 5h16l-6.2 7.1v5.3l-3.6 1.8v-7.1L4 5z"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+            <path v-else d="M6 6l12 12M18 6L6 18" stroke-linecap="round" stroke-linejoin="round" />
           </svg>
+        </button>
 
-          <h3 class="card-name">{{ formatPokemonDisplayName(getDisplayName(pokemon), 'INCONNU') }}</h3>
+        <!-- Search panel -->
+        <div class="profile-search-panel" :class="{ open: profileSearchOpen }" role="search">
+          <div class="profile-search-head">
+            <h4>FILTRES</h4>
+            <button
+              type="button"
+              class="profile-search-reset"
+              :disabled="!isProfileFilterActive"
+              @click="resetProfileFilters"
+            >RESET</button>
+          </div>
 
-          <button
-            type="button"
-            class="card-favorite-btn"
-            :class="{
-              active: isFavorite(pokemon._id),
-              'is-launching': isFavoriteLaunching(pokemon._id),
-              'is-catching': isFavoriteShaking(pokemon._id),
-              'is-bursting': isFavoriteBursting(pokemon._id),
-              'is-releasing': isFavoriteConcealing(pokemon._id)
-            }"
-            :aria-label="
-              isFavoriteAnimating(pokemon._id)
-                ? 'Animation en cours'
-                : isFavorite(pokemon._id)
-                  ? 'Retirer des favoris'
-                  : 'Ajouter aux favoris'
-            "
-            @click.stop="toggleFavorite(pokemon._id, $event)"
-          >
-            <span class="pokeball-burst" aria-hidden="true"></span>
-            <svg
-              v-if="!isFavoriteBallClosed(pokemon._id)"
-              class="favorite-icon open-pokeball-icon"
-              width="60"
-              height="61"
-              viewBox="0 0 60 61"
-              fill="none"
-              xmlns="http://www.w3.org/2000/svg"
-              aria-hidden="true"
-            >
-              <use href="#icon-pokeball-open" />
-            </svg>
-            <svg
-              v-else
-              class="favorite-icon pokeball-icon"
-              width="60"
-              height="61"
-              viewBox="0 0 60 61"
-              fill="none"
-              xmlns="http://www.w3.org/2000/svg"
-              aria-hidden="true"
-            >
-              <use href="#icon-pokeball-closed" />
-            </svg>
-          </button>
+          <div class="profile-search-field profile-search-field--full">
+            <label for="profile-search-name">Recherche par nom</label>
+            <input
+              id="profile-search-name"
+              type="search"
+              v-model="profileSearchName"
+              placeholder="Ex: Bulbizarre"
+              class="profile-search-input"
+              autocomplete="off"
+            />
+          </div>
 
-          <img
-            class="card-image"
-            :class="{
-              silhouette: shouldUseSilhouette(pokemon._id),
-              revealing: isFavoriteRevealing(pokemon._id),
-              'capture-hidden': isFavoriteHidden(pokemon._id)
-            }"
-            :src="pokemon.imgUrl"
-            :alt="getDisplayName(pokemon) || 'Pokemon'"
-            loading="lazy"
-            decoding="async"
-          />
-          <img
-            v-if="isFavoriteConcealing(pokemon._id)"
-            class="card-image-conceal"
-            :src="pokemon.imgUrl"
-            :alt="''"
-            loading="lazy"
-            decoding="async"
-            aria-hidden="true"
-          />
-        </article>
-      </div>
+          <div class="profile-search-fields-grid">
+            <div class="profile-search-field">
+              <label for="profile-filter-type">Type</label>
+              <select id="profile-filter-type" v-model="profileFilterType">
+                <option value="ALL">Tous les types</option>
+                <option v-for="type in profileAvailableTypes" :key="type" :value="type">
+                  {{ TYPE_LABELS_FR[type] || type }}
+                </option>
+              </select>
+            </div>
+            <div class="profile-search-field">
+              <label for="profile-filter-region">Région</label>
+              <select id="profile-filter-region" v-model="profileFilterRegion">
+                <option value="ALL">Toutes les régions</option>
+                <option v-for="r in profileAvailableRegions" :key="r.value" :value="r.value">{{ r.label }}</option>
+              </select>
+            </div>
+          </div>
+          <div class="profile-search-field">
+            <label for="profile-sort-by">Tri</label>
+            <select id="profile-sort-by" v-model="profileSortBy">
+              <option value="DEFAULT">Par défaut</option>
+              <option value="NAME_ASC">Nom A-Z</option>
+              <option value="NAME_DESC">Nom Z-A</option>
+              <option value="DEX_ASC">Pokédex croissant</option>
+              <option value="DEX_DESC">Pokédex décroissant</option>
+            </select>
+          </div>
 
-      <Transition name="profile-detail">
+          <small>{{ filteredFavoritePokemons.length }} / {{ favoritePokemons.length }} favoris</small>
+        </div>
+
+        <div class="profile-detail-slot" :class="{ open: selectedPokemon }">
+          <Transition name="profile-detail">
         <aside v-if="selectedPokemon" class="profile-detail-panel">
           <div class="detail-hero" :style="{ '--hero-bg': getCardColor(selectedPokemon) }">
             <div class="detail-head-row">
@@ -1139,9 +1344,14 @@ watch(
               </button>
             </div>
 
-            <svg class="detail-hero-mark" viewBox="0 0 162 162" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-              <path d="M50.5977 85.4453C52.7241 100.309 65.5053 111.735 80.957 111.735C96.4091 111.735 109.191 100.309 111.317 85.4453H161.452C159.067 127.953 123.843 161.688 80.7383 161.688C37.6338 161.688 2.41053 127.953 0.0253906 85.4453H50.5977ZM80.7383 0C123.991 0 159.311 33.9671 161.478 76.6816H111.317C109.191 61.8173 96.4093 50.3906 80.957 50.3906C65.5051 50.391 52.7239 61.8176 50.5977 76.6816H0C2.16635 33.9672 37.4855 0.000197082 80.7383 0Z" fill="white" fill-opacity="0.28"/>
-              <circle cx="80.9579" cy="81.0632" r="15.3363" fill="white" fill-opacity="0.28"/>
+            <svg
+              class="detail-energy-mark"
+              :viewBox="getEnergyIconViewBox(selectedPokemon)"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+              aria-hidden="true"
+            >
+              <use :href="'#' + getEnergyIconId(selectedPokemon)" />
             </svg>
 
             <img
@@ -1339,6 +1549,11 @@ watch(
                   <div>
                     <dt>HABITAT</dt>
                     <dd>{{ formatSlugLabel(selectedPokemon?.habitat) }}</dd>
+                    <div class="detail-flag-row" v-if="selectedMetaFlags?.length">
+                      <span v-for="flag in selectedMetaFlags" :key="`${selectedPokemon._id}-flag-${flag}`">
+                        {{ flag }}
+                      </span>
+                    </div>
                   </div>
                   <div>
                     <dt>CROISSANCE</dt>
@@ -1349,12 +1564,6 @@ watch(
                     <dd>{{ selectedCaptureRateLabel }}</dd>
                   </div>
                 </dl>
-
-                <div class="detail-flag-row">
-                  <span v-for="flag in selectedMetaFlags" :key="`${selectedPokemon._id}-flag-${flag}`">
-                    {{ flag }}
-                  </span>
-                </div>
               </article>
             </Transition>
 
@@ -1409,19 +1618,22 @@ watch(
             </div>
           </div>
         </aside>
-      </Transition>
+          </Transition>
+        </div><!-- /profile-detail-slot -->
+      </div><!-- /profile-content-layout -->
     </section>
   </main>
 </template>
 
 <style scoped>
 .profile-page {
-  min-height: 100dvh;
+  height: 100dvh;
   width: min(100%, 1728px);
   margin: 0 auto;
   display: grid;
-  grid-template-columns: minmax(320px, 40%) minmax(520px, 60%);
-  background: #b4e7e3;
+  grid-template-columns: minmax(280px, 36%) minmax(0, 1fr);
+  background: transparent;
+  overflow: hidden;
 }
 
 .icon-sprite-defs {
@@ -1431,133 +1643,229 @@ watch(
 }
 
 .profile-left {
-  background: #86c7e0;
+  background: linear-gradient(160deg, #0e1015 0%, #111520 100%);
+  border-right: 1px solid rgba(255,255,255,0.07);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: space-between;
   padding: clamp(24px, 4.2vh, 52px) clamp(16px, 2.5vw, 40px);
+  position: relative;
+  overflow: hidden;
+}
+
+.profile-left::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(200,20,50,0.08) 0%, transparent 50%);
+  pointer-events: none;
 }
 
 .profile-user-block {
   margin-top: clamp(30px, 8vh, 90px);
   text-align: center;
+  position: relative;
+  z-index: 1;
 }
 
 .profile-user-block h1 {
   margin: 0;
-  color: #03090f;
-  font-family: 'Astra', 'Poppins', sans-serif;
-  font-size: clamp(2rem, 3.2vw, 4rem);
-  letter-spacing: 0.04em;
+  color: #f0f8ff;
+  font-family: 'Rajdhani', 'Poppins', sans-serif;
+  font-size: clamp(1.8rem, 2.8vw, 3.2rem);
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   line-height: 0.92;
+  font-weight: 700;
+  text-shadow: 0 2px 16px rgba(200,30,50,0.25);
 }
 
 .profile-user-block p {
-  margin: 14px 0 0;
-  color: rgba(238, 249, 255, 0.95);
-  font-family: 'Astra', 'Poppins', sans-serif;
-  font-size: clamp(1.2rem, 2vw, 2.1rem);
+  margin: 12px 0 0;
+  color: rgba(150,200,255,0.65);
+  font-family: 'Rajdhani', 'Poppins', sans-serif;
+  font-size: clamp(0.85rem, 1.2vw, 1.1rem);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.1em;
+  font-weight: 600;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 999px;
+  padding: 3px 12px;
+  background: rgba(255,255,255,0.05);
+  display: inline-block;
 }
 
+
 .profile-watermark {
-  width: min(66%, 340px);
+  width: min(60%, 300px);
   height: auto;
+  opacity: 0.12;
+  position: relative;
+  z-index: 1;
 }
 
 .logout-btn {
-  width: min(100%, 470px);
-  min-height: clamp(62px, 8vh, 90px);
-  border: 0;
-  border-radius: 20px;
-  background: #ca1f3d;
-  color: #f5f8fb;
-  font-family: 'Astra', 'Poppins', sans-serif;
-  font-size: clamp(1.3rem, 1.9vw, 2.1rem);
-  letter-spacing: 0.04em;
+  width: min(100%, 380px);
+  min-height: clamp(52px, 7vh, 72px);
+  border: 1px solid rgba(200,20,40,0.45);
+  border-radius: 16px;
+  background: rgba(200,20,40,0.2);
+  backdrop-filter: blur(10px);
+  color: rgba(255,160,170,0.9);
+  font-family: 'Rajdhani','Poppins',sans-serif;
+  font-size: clamp(1rem, 1.4vw, 1.4rem);
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   cursor: pointer;
+  font-weight: 700;
+  position: relative;
+  z-index: 1;
+  transition: background 200ms ease, border-color 200ms ease, transform 160ms ease;
+}
+
+.logout-btn:hover {
+  background: rgba(200,20,40,0.35);
+  border-color: rgba(200,20,40,0.7);
+}
+
+.logout-btn:active {
+  transform: scale(0.97);
 }
 
 .profile-right {
   position: relative;
-  padding: clamp(22px, 3.6vh, 44px) clamp(18px, 2.6vw, 46px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: clamp(16px, 2.6vh, 32px) clamp(12px, 2vw, 32px);
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  height: 100%;
+}
+
+.profile-content-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+  flex: 1;
+}
+
+.profile-content-layout.with-detail {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.profile-favorites-area {
   display: grid;
   align-content: start;
-  gap: 18px;
+  gap: 16px;
+  min-width: 0;
+}
+
+.profile-detail-slot {
+  width: 0;
   overflow: hidden;
+  pointer-events: none;
+  transition: width 280ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.profile-detail-slot.open {
+  width: clamp(300px, 28vw, 420px);
+  overflow: visible;
+  pointer-events: auto;
 }
 
 .favorites-title {
   margin: 0;
-  text-align: center;
-  color: #020a10;
-  font-family: 'Astra', 'Poppins', sans-serif;
-  font-size: clamp(2rem, 3.6vw, 4.1rem);
-  letter-spacing: 0.04em;
+  text-align: left;
+  color: rgba(200,235,255,0.9);
+  font-family: 'Rajdhani','Poppins',sans-serif;
+  font-size: clamp(1.4rem, 2.6vw, 2.8rem);
+  letter-spacing: 0.08em;
   text-transform: uppercase;
+  font-weight: 700;
 }
 
 .profile-state {
-  min-height: 240px;
+  min-height: 200px;
   border-radius: 18px;
-  background: rgba(240, 252, 255, 0.6);
-  color: #1b4b5e;
-  font-family: 'Poppins', 'Segoe UI', sans-serif;
-  font-weight: 700;
+  background: rgba(255,255,255,0.05);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,0.08);
+  color: rgba(160,210,255,0.7);
+  font-family: 'Poppins',sans-serif;
+  font-weight: 600;
   display: grid;
   place-items: center;
   padding: 20px;
 }
 
 .profile-state.error {
-  color: #9e2731;
+  color: #ff8090;
 }
 
 .favorites-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 18px;
+  gap: 16px;
   align-content: start;
-  max-height: calc(100dvh - 140px);
-  overflow-y: auto;
-  padding-right: 4px;
 }
 
 .favorite-card {
   --card-bg: #435467;
   position: relative;
-  min-height: 260px;
+  min-height: 220px;
   border-radius: 24px;
-  border: 0;
-  background: var(--card-bg);
+  border: 1px solid color-mix(in srgb, var(--card-bg) 55%, rgba(255,255,255,0.3));
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--card-bg) 28%, transparent) 0%, color-mix(in srgb, var(--card-bg) 14%, transparent) 100%);
   overflow: hidden;
-  box-shadow: 0 8px 18px rgba(48, 78, 95, 0.2);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.18);
   content-visibility: auto;
   contain-intrinsic-size: 250px;
   cursor: pointer;
+  transition: transform 200ms ease, box-shadow 240ms ease;
 }
 
-.card-pokeball-mark {
+.favorite-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 50%;
+  background: linear-gradient(180deg, rgba(255,255,255,0.12) 0%, transparent 100%);
+  border-radius: 24px 24px 0 0;
+  pointer-events: none;
+}
+
+.favorite-card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 20px 40px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.22);
+}
+
+.card-energy-mark {
   width: clamp(150px, 16vw, 238px);
   position: absolute;
   right: -56px;
   bottom: -42px;
   pointer-events: none;
+  opacity: 0.95;
+  z-index: 0;
 }
 
 .card-name {
-  margin: 28px 20px 0;
-  color: #f7fbff;
+  margin: 24px 18px 0;
+  color: #ffffff;
   text-transform: uppercase;
-  font-family: 'Astra', 'Poppins', sans-serif;
-  font-size: clamp(1.15rem, 1.65vw, 2.1rem);
-  letter-spacing: 0.08em;
+  font-family: 'Rajdhani','Astra','Poppins',sans-serif;
+  font-size: clamp(1rem, 1.4vw, 1.6rem);
+  letter-spacing: 0.07em;
+  font-weight: 700;
   line-height: 1;
-  max-width: 64%;
+  max-width: 62%;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.4);
+  position: relative;
+  z-index: 1;
 }
 
 .card-favorite-btn {
@@ -1685,22 +1993,38 @@ watch(
 }
 
 .profile-detail-panel {
-  position: absolute;
-  inset: 0;
-  border-radius: 0;
-  background: #e9e9e9;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  z-index: 20;
+  position: relative;
+  width: clamp(300px, 28vw, 420px);
+  height: calc(100dvh - 40px);
+  max-height: 860px;
+  background: linear-gradient(160deg, #0e1015 0%, #13151c 100%);
+  border-radius: 24px;
+  border: 1px solid rgba(255,255,255,0.08);
+  box-shadow: 0 24px 48px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.07);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
 }
 
 .detail-hero {
   --hero-bg: #4f7fce;
   min-height: clamp(250px, 34vh, 340px);
-  background: var(--hero-bg);
+  background:
+    linear-gradient(160deg, color-mix(in srgb, var(--hero-bg) 40%, #0a0c10) 0%, color-mix(in srgb, var(--hero-bg) 22%, #0a0c10) 100%);
   position: relative;
   overflow: hidden;
   padding: 14px 18px 0;
+}
+
+.detail-hero::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 50%;
+  background: linear-gradient(180deg, rgba(255,255,255,0.1) 0%, transparent 100%);
+  pointer-events: none;
+  z-index: 0;
 }
 
 .detail-head-row {
@@ -1715,14 +2039,26 @@ watch(
 .detail-close {
   width: 36px;
   height: 36px;
-  border: 0;
+  border: 1px solid rgba(255,255,255,0.18);
   border-radius: 999px;
-  background: transparent;
+  background: rgba(255,255,255,0.1);
+  backdrop-filter: blur(8px);
   color: #eaf4ff;
-  font-size: 1.95rem;
+  font-size: 1.4rem;
   line-height: 1;
   cursor: pointer;
   padding: 0;
+  display: grid;
+  place-items: center;
+  transition: background 160ms ease, transform 120ms ease;
+}
+
+.detail-close:hover {
+  background: rgba(255,255,255,0.22);
+}
+
+.detail-close:active {
+  transform: scale(0.92);
 }
 
 .detail-title {
@@ -1732,11 +2068,14 @@ watch(
   text-overflow: ellipsis;
   white-space: nowrap;
   text-align: center;
-  color: #edf6ff;
-  font-family: 'Astra', 'Poppins', sans-serif;
+  color: #ffffff;
+  font-family: 'Rajdhani', 'Astra', 'Poppins', sans-serif;
   letter-spacing: 0.08em;
-  font-size: clamp(1.05rem, 1.65vw, 1.55rem);
+  font-size: clamp(18px, 1.4vw, 22px);
+  font-weight: 700;
   text-transform: uppercase;
+  line-height: 1;
+  text-shadow: 0 1px 6px rgba(0,0,0,0.4);
 }
 
 .detail-ball-toggle {
@@ -1766,14 +2105,15 @@ watch(
   bottom: 12px;
   width: 46px;
   height: 46px;
-  border: 0;
+  border: 1px solid rgba(255,255,255,0.18);
   border-radius: 999px;
-  background: rgba(244, 250, 255, 0.9);
-  color: #14222b;
+  background: rgba(255,255,255,0.12);
+  backdrop-filter: blur(10px);
+  color: rgba(200,235,255,0.9);
   display: grid;
   place-items: center;
   cursor: pointer;
-  box-shadow: 0 8px 14px rgba(19, 44, 57, 0.3);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.35);
   z-index: 15;
   transition: transform 140ms ease, background-color 160ms ease, color 160ms ease, opacity 140ms ease;
 }
@@ -1811,13 +2151,15 @@ watch(
   display: none;
 }
 
-.detail-hero-mark {
+.detail-energy-mark {
   position: absolute;
   right: -24px;
   bottom: 14px;
   width: 210px;
   height: 210px;
   pointer-events: none;
+  opacity: 0.95;
+  z-index: 0;
 }
 
 .detail-hero-image {
@@ -1862,29 +2204,33 @@ watch(
 .detail-body {
   min-height: 0;
   overflow-y: auto;
-  padding: 14px;
+  overscroll-behavior: contain;
+  padding: 10px 12px 14px;
   display: grid;
   align-content: start;
-  gap: 12px;
+  gap: 10px;
+  background: linear-gradient(160deg, #0e1015 0%, #13151c 100%);
 }
 
 .detail-card {
-  background: #d6f2f4;
+  background: rgba(255,255,255,0.05);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.52);
-  box-shadow: 0 4px 10px rgba(39, 79, 87, 0.18);
+  border: 1px solid rgba(255,255,255,0.09);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.07);
   padding: 10px;
 }
 
 .detail-card h4 {
   margin: 0 0 8px;
-  color: #11303f;
-  font-family: 'Poppins', 'Segoe UI', sans-serif;
-  font-size: 0.95rem;
+  color: rgba(200,235,255,0.9);
+  font-family: 'Rajdhani','Poppins',sans-serif;
+  font-size: 0.88rem;
   line-height: 1;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.07em;
   text-transform: uppercase;
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .detail-section-tabs {
@@ -1894,14 +2240,14 @@ watch(
 }
 
 .detail-section-tab {
-  border: 0;
+  border: 1px solid rgba(255,255,255,0.08);
   border-radius: 10px;
-  background: rgba(118, 186, 208, 0.24);
-  color: rgba(18, 52, 66, 0.68);
-  font-family: 'Poppins', 'Segoe UI', sans-serif;
-  font-size: 0.64rem;
-  font-weight: 800;
-  letter-spacing: 0.04em;
+  background: rgba(255,255,255,0.06);
+  color: rgba(180,220,255,0.6);
+  font-family: 'Rajdhani','Poppins',sans-serif;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   line-height: 1;
   padding: 8px 5px;
@@ -1910,13 +2256,15 @@ watch(
 }
 
 .detail-section-tab:hover {
-  background: rgba(102, 174, 198, 0.34);
+  background: rgba(255,255,255,0.12);
+  color: rgba(200,235,255,0.9);
 }
 
 .detail-section-tab.active {
-  background: #6eaed6;
-  color: #eef8ff;
-  box-shadow: 0 6px 10px rgba(41, 87, 111, 0.2);
+  background: rgba(100,180,240,0.25);
+  border-color: rgba(100,180,240,0.45);
+  color: #8dd4ff;
+  box-shadow: 0 4px 12px rgba(60,160,240,0.2);
 }
 
 .detail-section-tab:active {
@@ -1939,7 +2287,7 @@ watch(
 }
 
 .detail-tab-panel {
-  min-height: 0;
+  height: auto;
 }
 
 .detail-card-head {
@@ -1950,11 +2298,11 @@ watch(
 }
 
 .detail-total-tag {
-  font-family: 'Poppins', 'Segoe UI', sans-serif;
+  font-family: 'Poppins',sans-serif;
   font-size: 0.66rem;
   font-weight: 800;
-  color: #18394b;
-  background: rgba(115, 160, 244, 0.18);
+  color: rgba(140,200,255,0.8);
+  background: rgba(100,160,255,0.12);
   border-radius: 999px;
   padding: 4px 8px;
   letter-spacing: 0.03em;
@@ -2011,6 +2359,7 @@ watch(
 
 .detail-kv-grid.compact {
   gap: 4px 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .detail-kv-grid div {
@@ -2020,20 +2369,20 @@ watch(
 
 .detail-kv-grid dt {
   margin: 0;
-  font-family: 'Poppins', 'Segoe UI', sans-serif;
+  font-family: 'Poppins',sans-serif;
   font-size: 0.58rem;
-  letter-spacing: 0.05em;
-  color: rgba(17, 48, 63, 0.72);
-  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: rgba(120,180,240,0.6);
+  font-weight: 700;
   text-transform: uppercase;
 }
 
 .detail-kv-grid dd {
   margin: 0;
-  font-family: 'Poppins', 'Segoe UI', sans-serif;
+  font-family: 'Poppins',sans-serif;
   font-size: 0.75rem;
   font-weight: 700;
-  color: #0f2834;
+  color: rgba(200,235,255,0.9);
   line-height: 1.2;
 }
 
@@ -2048,24 +2397,26 @@ watch(
 .detail-ability-list li {
   min-height: 23px;
   border-radius: 8px;
-  background: rgba(120, 186, 208, 0.2);
-  padding: 4px 8px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.07);
+  padding: 5px 9px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  font-family: 'Poppins', 'Segoe UI', sans-serif;
+  font-family: 'Poppins',sans-serif;
   font-size: 0.72rem;
   line-height: 1;
-  color: #143646;
-  font-weight: 700;
+  color: rgba(200,230,255,0.85);
+  font-weight: 600;
 }
 
 .detail-ability-list small {
   font-size: 0.54rem;
-  letter-spacing: 0.04em;
-  font-weight: 900;
-  color: #26566d;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+  color: rgba(130,190,255,0.7);
+  text-transform: uppercase;
 }
 
 .detail-muted {
@@ -2081,19 +2432,19 @@ watch(
 }
 
 .detail-subline span {
-  font-family: 'Poppins', 'Segoe UI', sans-serif;
+  font-family: 'Poppins',sans-serif;
   font-size: 0.56rem;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: rgba(17, 48, 63, 0.72);
-  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: rgba(140,200,255,0.6);
+  font-weight: 700;
 }
 
 .detail-subline strong {
-  font-family: 'Poppins', 'Segoe UI', sans-serif;
+  font-family: 'Poppins',sans-serif;
   font-size: 0.68rem;
-  color: #0f2834;
-  font-weight: 800;
+  color: rgba(200,235,255,0.9);
+  font-weight: 700;
   text-align: right;
 }
 
@@ -2113,20 +2464,21 @@ watch(
 }
 
 .detail-stat-label {
-  font-family: 'Poppins', 'Segoe UI', sans-serif;
-  font-size: 0.62rem;
-  letter-spacing: 0.04em;
-  color: #184050;
-  font-weight: 800;
+  font-family: 'Rajdhani','Poppins',sans-serif;
+  font-size: 0.65rem;
+  letter-spacing: 0.05em;
+  color: rgba(140,200,255,0.7);
+  font-weight: 700;
+  text-transform: uppercase;
 }
 
 .detail-stat-track {
   position: relative;
   display: block;
   width: 100%;
-  height: 7px;
+  height: 6px;
   border-radius: 999px;
-  background: rgba(104, 165, 185, 0.26);
+  background: rgba(255,255,255,0.08);
   overflow: hidden;
 }
 
@@ -2135,14 +2487,15 @@ watch(
   inset: 0 auto 0 0;
   width: 0;
   border-radius: inherit;
-  background: linear-gradient(90deg, #6aa6d9 0%, #7fd0e1 100%);
+  background: linear-gradient(90deg, #4090d0 0%, #70d0f0 100%);
+  box-shadow: 0 0 8px rgba(80,180,240,0.4);
 }
 
 .detail-stat-value {
-  font-family: 'Poppins', 'Segoe UI', sans-serif;
+  font-family: 'Poppins',sans-serif;
   font-size: 0.68rem;
-  color: #0f2834;
-  font-weight: 800;
+  color: rgba(200,235,255,0.9);
+  font-weight: 700;
 }
 
 .detail-flag-row {
@@ -2154,21 +2507,25 @@ watch(
 
 .detail-flag-row span {
   border-radius: 999px;
-  background: rgba(66, 122, 141, 0.2);
-  color: #184456;
-  font-family: 'Poppins', 'Segoe UI', sans-serif;
-  font-size: 0.58rem;
+  background: rgba(255,255,255,0.07);
+  border: 1px solid rgba(255,255,255,0.1);
+  color: rgba(180,220,255,0.7);
+  font-family: 'Rajdhani','Poppins',sans-serif;
+  font-size: 0.62rem;
   line-height: 1;
-  letter-spacing: 0.04em;
-  font-weight: 900;
+  letter-spacing: 0.06em;
+  font-weight: 700;
   text-transform: uppercase;
-  padding: 4px 7px;
+  padding: 4px 8px;
 }
 
 .region-card {
   position: relative;
   overflow: hidden;
   min-height: 162px;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.08);
   padding: 0;
 }
 
@@ -2185,40 +2542,42 @@ watch(
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
-  color: #111111;
-  font-family: 'Poppins', 'Segoe UI', sans-serif;
-  font-weight: 900;
-  font-size: 1.05rem;
+  color: #e8f4ff;
+  font-family: 'Rajdhani','Poppins',sans-serif;
+  font-weight: 700;
+  font-size: 1rem;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.7);
+  letter-spacing: 0.06em;
+  text-shadow: 0 1px 6px rgba(0,0,0,0.7);
 }
 
 .detail-description {
   margin: 0;
-  background: #f1f4f5;
+  background: rgba(255,255,255,0.05);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border-radius: 14px;
-  border: 1px solid rgba(197, 205, 208, 0.6);
-  box-shadow: 0 4px 10px rgba(39, 79, 87, 0.12);
+  border: 1px solid rgba(255,255,255,0.09);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.07);
   padding: 12px;
 }
 
 .detail-description h4 {
   margin: 0 0 8px;
-  color: #111111;
-  font-size: 1.14rem;
-  font-family: 'Poppins', 'Segoe UI', sans-serif;
-  font-weight: 900;
-  letter-spacing: 0.02em;
+  color: rgba(200,235,255,0.9);
+  font-size: 1rem;
+  font-family: 'Rajdhani','Poppins',sans-serif;
+  font-weight: 700;
+  letter-spacing: 0.07em;
   text-transform: uppercase;
 }
 
 .detail-description p {
   margin: 0;
-  color: #111111;
-  font-size: 0.92rem;
-  line-height: 1.45;
-  font-family: 'Poppins', 'Segoe UI', sans-serif;
+  color: rgba(180,215,255,0.75);
+  font-size: 0.88rem;
+  line-height: 1.5;
+  font-family: 'Poppins',sans-serif;
 }
 
 .detail-lower-grid {
@@ -2227,10 +2586,13 @@ watch(
 }
 
 .group30-card {
-  background: #abe2e6;
+  background: rgba(255,255,255,0.05);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,0.08);
   border-radius: 14px;
-  box-shadow: 0 5px 12px rgba(35, 84, 93, 0.24);
-  padding: 10px 10px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+  padding: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2289,9 +2651,9 @@ watch(
 }
 
 .group30-arrow {
-  font-size: 1.35rem;
+  font-size: 1.2rem;
   line-height: 1;
-  color: #111111;
+  color: rgba(120,180,240,0.6);
   margin: 0 1px;
 }
 
@@ -2304,18 +2666,18 @@ watch(
 }
 
 .detail-description-audio {
-  border: 0;
+  border: 1px solid rgba(255,255,255,0.12);
   border-radius: 999px;
-  background: #79bdd9;
-  color: #0b2733;
-  font-family: 'Poppins', 'Segoe UI', sans-serif;
-  font-size: 0.7rem;
-  font-weight: 900;
-  letter-spacing: 0.04em;
-  padding: 6px 10px;
+  background: rgba(255,255,255,0.08);
+  color: rgba(160,220,255,0.85);
+  font-family: 'Rajdhani','Poppins',sans-serif;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 6px 12px;
   line-height: 1;
   cursor: pointer;
-  transition: transform 130ms ease, opacity 130ms ease, background-color 160ms ease, color 160ms ease;
+  transition: transform 130ms ease, opacity 130ms ease, background-color 160ms ease;
 }
 
 .detail-description-audio:not(:disabled):active {
@@ -2328,19 +2690,242 @@ watch(
 }
 
 .detail-description-audio.playing {
-  background: #152735;
-  color: #eef8ff;
+  background: rgba(60,140,200,0.3);
+  border-color: rgba(80,180,240,0.45);
+  color: #8dd4ff;
 }
 
 .profile-detail-enter-active,
 .profile-detail-leave-active {
-  transition: opacity 220ms ease, transform 260ms ease;
+  transition: opacity 220ms ease, transform 280ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .profile-detail-enter-from,
 .profile-detail-leave-to {
   opacity: 0;
   transform: translateX(24px);
+}
+
+/* Desktop: slot sticks just below the header */
+@media (min-width: 900px) {
+  .profile-detail-slot.open {
+    position: sticky;
+    top: 20px;
+    align-self: start;
+  }
+}
+
+/* Mobile / narrow: stack detail panel below favorites */
+@media (max-width: 899px) {
+  .profile-content-layout.with-detail {
+    grid-template-columns: 1fr;
+  }
+
+  .profile-detail-slot {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 100;
+    display: block;
+    width: 100% !important;
+    overflow: hidden;
+    pointer-events: none;
+    background: rgba(9, 16, 24, 0.28);
+    opacity: 0;
+    transition: opacity 220ms ease;
+  }
+
+  .profile-detail-slot.open {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .profile-detail-panel {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    max-width: none;
+    height: 100dvh;
+    max-height: 100dvh;
+    margin: 0;
+    border-radius: 0;
+    border: 0;
+    overflow-y: auto;
+  }
+
+  .profile-detail-enter-from,
+  .profile-detail-leave-to {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+
+  .favorites-grid {
+    max-height: none;
+  }
+}
+
+/* ═══════════════════════════════ FILTER ═════════════════════════ */
+.profile-filter-fab {
+  position: fixed;
+  right: 28px;
+  bottom: 30px;
+  width: 60px;
+  aspect-ratio: 1 / 1;
+  border: 1px solid rgba(200,25,45,0.5);
+  border-radius: 18px;
+  background: linear-gradient(135deg, #c92030 0%, #a81020 100%);
+  box-shadow: 0 8px 24px rgba(180,10,30,0.45), inset 0 1px 0 rgba(255,255,255,0.2);
+  color: #fff;
+  cursor: pointer;
+  z-index: 20;
+  transition: transform 160ms ease, box-shadow 200ms ease;
+  display: grid;
+  place-items: center;
+}
+
+.profile-filter-fab:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 32px rgba(180,10,30,0.6), inset 0 1px 0 rgba(255,255,255,0.25);
+}
+
+.profile-filter-fab:active {
+  transform: scale(0.93);
+}
+
+.profile-filter-fab.active {
+  background: linear-gradient(135deg, #111318 0%, #1a1d26 100%);
+  border-color: rgba(255,255,255,0.2);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+}
+
+.profile-filter-fab svg {
+  width: 26px;
+  height: 26px;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.profile-search-panel {
+  position: fixed;
+  right: 26px;
+  bottom: 106px;
+  width: min(340px, calc(100vw - 52px));
+  background: rgba(10,12,18,0.94);
+  backdrop-filter: blur(20px) saturate(1.6);
+  -webkit-backdrop-filter: blur(20px) saturate(1.6);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 18px;
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+  box-shadow: 0 20px 40px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.07);
+  transform: translateY(14px);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 200ms cubic-bezier(0.22,1,0.36,1), opacity 180ms ease;
+  z-index: 19;
+}
+
+.profile-search-panel.open {
+  transform: translateY(0);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.profile-search-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.profile-search-head h4 {
+  margin: 0;
+  color: rgba(200,235,255,0.9);
+  font-size: 0.88rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  font-family: 'Rajdhani','Poppins',sans-serif;
+  text-transform: uppercase;
+}
+
+.profile-search-reset {
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 999px;
+  background: rgba(200,30,50,0.25);
+  color: rgba(255,160,170,0.9);
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 4px 10px;
+  font-family: 'Rajdhani','Poppins',sans-serif;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  transition: background 160ms ease;
+}
+
+.profile-search-reset:disabled { opacity: 0.35; cursor: default; }
+.profile-search-reset:not(:disabled):hover { background: rgba(200,30,50,0.4); }
+
+.profile-search-field {
+  display: grid;
+  gap: 5px;
+}
+
+.profile-search-field--full { width: 100%; }
+
+.profile-search-field label {
+  font-family: 'Rajdhani','Poppins',sans-serif;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: rgba(140,200,255,0.7);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.profile-search-input,
+.profile-search-panel select {
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 10px;
+  padding: 7px 10px;
+  font-size: 0.88rem;
+  font-family: 'Poppins',sans-serif;
+  color: rgba(200,235,255,0.9);
+  outline: none;
+  background: rgba(255,255,255,0.07);
+  width: 100%;
+  cursor: pointer;
+}
+
+.profile-search-input::placeholder {
+  color: rgba(120,160,200,0.45);
+}
+
+.profile-search-input:focus,
+.profile-search-panel select:focus {
+  border-color: rgba(80,160,240,0.5);
+  background: rgba(255,255,255,0.1);
+}
+
+.profile-search-panel select option {
+  background: #1a1d26;
+  color: #e8f4ff;
+}
+
+.profile-search-fields-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0,1fr));
+  gap: 8px;
+}
+
+.profile-search-panel small {
+  color: rgba(120,180,240,0.55);
+  font-size: 0.75rem;
+  letter-spacing: 0.03em;
+  font-family: 'Poppins',sans-serif;
 }
 
 @keyframes favorite-ball-launch {
@@ -2538,7 +3123,16 @@ watch(
 }
 
 @media (max-width: 760px) {
+  .profile-page {
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+  }
+
   .profile-right {
+    height: auto;
+    overflow-y: visible;
+    overscroll-behavior: auto;
     padding: 14px;
   }
 
@@ -2551,7 +3145,11 @@ watch(
   }
 
   .detail-kv-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .detail-kv-grid.compact {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .group30-card {
