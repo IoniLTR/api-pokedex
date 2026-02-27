@@ -1,7 +1,8 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import AppHeader from './components/AppHeader.vue'
 import { RouterView, useRoute, useRouter } from 'vue-router'
+import { updateSeoFromRoute } from './services/seoService'
 
 const route = useRoute()
 const router = useRouter()
@@ -11,6 +12,14 @@ const isHomeRoute = computed(() => route.path === '/')
 const goHome = async () => {
   await router.push('/')
 }
+
+watch(
+  () => route.fullPath,
+  () => {
+    updateSeoFromRoute(route)
+  },
+  { immediate: true }
+)
 </script>
 
 <template>

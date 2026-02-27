@@ -12,6 +12,8 @@ const searchInputEl = ref(null)
 const authToken = ref('')
 const authUser = ref(null)
 const headerLogoSrc = '/pokedexlogo.png'
+const SEARCH_DEBOUNCE_MS = 180
+let searchDebounceTimer = null
 
 const isAuthenticated = computed(() => Boolean(authToken.value))
 const isHomeRoute = computed(() => route.path === '/')
@@ -45,11 +47,22 @@ const buildSearchQuery = () => {
 
 const applySearch = async ({ replace = false } = {}) => {
   const query = buildSearchQuery()
+  const nextQuery = normalizeQuery(query.q)
+  const currentQuery = normalizeQuery(route.query.q)
+  if (isHomeRoute.value && nextQuery === currentQuery) return
+
   const method = replace ? router.replace : router.push
   await method({ path: '/', query })
 }
 
+const clearSearchDebounce = () => {
+  if (!searchDebounceTimer) return
+  window.clearTimeout(searchDebounceTimer)
+  searchDebounceTimer = null
+}
+
 const handleHomeClick = async () => {
+  clearSearchDebounce()
   isSearchOpen.value = false
   await router.push('/')
   if (typeof window !== 'undefined') {
@@ -63,6 +76,7 @@ const handleSearchButtonClick = async () => {
     await focusSearchInput()
     return
   }
+  clearSearchDebounce()
   isSearchOpen.value = false
 }
 
@@ -72,10 +86,15 @@ const handleSearchSubmit = async () => {
 
 const handleSearchInput = () => {
   if (!isHomeRoute.value) return
-  void applySearch({ replace: true })
+  clearSearchDebounce()
+  searchDebounceTimer = window.setTimeout(() => {
+    void applySearch({ replace: true })
+    searchDebounceTimer = null
+  }, SEARCH_DEBOUNCE_MS)
 }
 
 const handleAccountClick = async () => {
+  clearSearchDebounce()
   isSearchOpen.value = false
   await router.push(accountTargetPath.value)
 }
@@ -90,6 +109,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  clearSearchDebounce()
   if (typeof window !== 'undefined') {
     window.removeEventListener('storage', syncAuthState)
     window.removeEventListener('focus', syncAuthState)

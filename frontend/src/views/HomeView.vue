@@ -35,6 +35,7 @@ const isDescriptionPlaying = ref(false)
 const descriptionSpeechSupported = ref(false)
 const evolutionFrNameCache = new Map()
 const evolutionSequenceCache = new Map()
+const regionFallbackImageCache = new Map()
 const DEFAULT_DESCRIPTION_TEXT = 'Aucune description disponible pour ce Pokemon.'
 let activeDescriptionUtterance = null
 let favoriteCaptureSfx = null
@@ -170,6 +171,17 @@ const normalizeToken = (value) =>
 
 const normalizeType = (type) => normalizeToken(type)
 
+const getCanonicalType = (type) => {
+  const normalized = normalizeType(type)
+  return TYPE_ALIASES[normalized] || normalized
+}
+
+const getSortablePokemonName = (pokemon) => {
+  const display = String(pokemon?.displayName || '').trim()
+  if (display) return display
+  return String(pokemon?.name || '').trim()
+}
+
 const fetchPokemons = async () => {
   loading.value = true
   error.value = null
@@ -212,15 +224,58 @@ const fetchPokemons = async () => {
   }
 }
 
+const pokemonSearchIndex = computed(() =>
+  pokemons.value.map((pokemon) => {
+    const sortableName = getSortablePokemonName(pokemon)
+    const normalizedName = normalizeToken(sortableName || pokemon?.name || '')
+    const normalizedRegion = normalizeToken(pokemon?.regions?.[0]?.regionName || '')
+    const canonicalTypes = (Array.isArray(pokemon?.types) ? pokemon.types : [])
+      .map((type) => getCanonicalType(type))
+      .filter(Boolean)
+    const dexValue = Number(pokemon?.regions?.[0]?.regionPokedexNumber)
+    const dexAsc = Number.isFinite(dexValue) ? dexValue : Number.POSITIVE_INFINITY
+    const dexDesc = Number.isFinite(dexValue) ? dexValue : Number.NEGATIVE_INFINITY
+
+    return {
+      pokemon,
+      id: String(pokemon?._id || ''),
+      sortableName,
+      normalizedName,
+      normalizedRegion,
+      canonicalTypes,
+      dexAsc,
+      dexDesc
+    }
+  })
+)
+
+const pokemonByDex = computed(() => {
+  const map = new Map()
+  for (const pokemon of pokemons.value) {
+    const dexNumber = getPokedexNumber(pokemon)
+    if (!Number.isFinite(dexNumber) || map.has(dexNumber)) continue
+    map.set(dexNumber, pokemon)
+  }
+  return map
+})
+
+const pokemonByNormalizedName = computed(() => {
+  const map = new Map()
+  for (const pokemon of pokemons.value) {
+    const displayName = normalizeToken(getDisplayName(pokemon))
+    const baseName = normalizeToken(pokemon?.name || '')
+    if (displayName && !map.has(displayName)) map.set(displayName, pokemon)
+    if (baseName && !map.has(baseName)) map.set(baseName, pokemon)
+  }
+  return map
+})
+
 const availableTypes = computed(() => {
   const knownTypes = new Set()
 
-  for (const pokemon of pokemons.value) {
-    const types = Array.isArray(pokemon?.types) ? pokemon.types : []
-    for (const type of types) {
-      const normalized = normalizeType(type)
-      const canonical = TYPE_ALIASES[normalized] || normalized
-      if (canonical) knownTypes.add(canonical)
+  for (const entry of pokemonSearchIndex.value) {
+    for (const type of entry.canonicalTypes) {
+      if (type) knownTypes.add(type)
     }
   }
 
@@ -253,60 +308,35 @@ const filteredPokemons = computed(() => {
   const regionFilter = selectedRegionFilter.value
   const favoritesOnly = showFavoritesOnly.value
 
-  const filtered = pokemons.value.filter((pokemon) => {
-    const pokemonName = normalizeToken(pokemon?.name || '')
-    const matchesName = !nameFilter || pokemonName.includes(nameFilter)
-
-    const pokemonTypes = Array.isArray(pokemon?.types) ? pokemon.types : []
-    const matchesType =
-      typeFilter === 'ALL' ||
-      pokemonTypes.some((type) => {
-        const normalized = normalizeType(type)
-        const canonical = TYPE_ALIASES[normalized] || normalized
-        return canonical === typeFilter
-      })
-
-    const pokemonRegion = normalizeToken(pokemon?.regions?.[0]?.regionName || '')
-    const matchesRegion = regionFilter === 'ALL' || pokemonRegion === regionFilter
-
-    const matchesFavorite = !favoritesOnly || isFavorite(pokemon?._id)
-
+  const filteredEntries = pokemonSearchIndex.value.filter((entry) => {
+    const matchesName = !nameFilter || entry.normalizedName.includes(nameFilter)
+    const matchesType = typeFilter === 'ALL' || entry.canonicalTypes.includes(typeFilter)
+    const matchesRegion = regionFilter === 'ALL' || entry.normalizedRegion === regionFilter
+    const matchesFavorite = !favoritesOnly || isFavorite(entry.id)
     return matchesName && matchesType && matchesRegion && matchesFavorite
   })
 
   if (sortFilter.value === 'NAME_ASC') {
-    return [...filtered].sort((a, b) =>
-      String(a?.name || '').localeCompare(String(b?.name || ''), 'fr', { sensitivity: 'base' })
-    )
+    return [...filteredEntries]
+      .sort((a, b) => a.sortableName.localeCompare(b.sortableName, 'fr', { sensitivity: 'base' }))
+      .map((entry) => entry.pokemon)
   }
 
   if (sortFilter.value === 'NAME_DESC') {
-    return [...filtered].sort((a, b) =>
-      String(b?.name || '').localeCompare(String(a?.name || ''), 'fr', { sensitivity: 'base' })
-    )
+    return [...filteredEntries]
+      .sort((a, b) => b.sortableName.localeCompare(a.sortableName, 'fr', { sensitivity: 'base' }))
+      .map((entry) => entry.pokemon)
   }
 
   if (sortFilter.value === 'DEX_ASC') {
-    return [...filtered].sort((a, b) => {
-      const dexA = Number(a?.regions?.[0]?.regionPokedexNumber)
-      const dexB = Number(b?.regions?.[0]?.regionPokedexNumber)
-      const safeDexA = Number.isFinite(dexA) ? dexA : Number.POSITIVE_INFINITY
-      const safeDexB = Number.isFinite(dexB) ? dexB : Number.POSITIVE_INFINITY
-      return safeDexA - safeDexB
-    })
+    return [...filteredEntries].sort((a, b) => a.dexAsc - b.dexAsc).map((entry) => entry.pokemon)
   }
 
   if (sortFilter.value === 'DEX_DESC') {
-    return [...filtered].sort((a, b) => {
-      const dexA = Number(a?.regions?.[0]?.regionPokedexNumber)
-      const dexB = Number(b?.regions?.[0]?.regionPokedexNumber)
-      const safeDexA = Number.isFinite(dexA) ? dexA : Number.NEGATIVE_INFINITY
-      const safeDexB = Number.isFinite(dexB) ? dexB : Number.NEGATIVE_INFINITY
-      return safeDexB - safeDexA
-    })
+    return [...filteredEntries].sort((a, b) => b.dexDesc - a.dexDesc).map((entry) => entry.pokemon)
   }
 
-  return filtered
+  return filteredEntries.map((entry) => entry.pokemon)
 })
 
 const hasActiveFilters = computed(
@@ -571,20 +601,15 @@ const openEvolutionDetails = (evolution) => {
   const dexNumber = Number(evolution?.dexNumber)
   const normalizedEvolutionName = normalizeToken(evolution?.name || '')
 
-  const pokemonByDex = Number.isFinite(dexNumber)
-    ? pokemons.value.find((item) => getPokedexNumber(item) === dexNumber)
+  const pokemonByDexMatch = Number.isFinite(dexNumber)
+    ? pokemonByDex.value.get(dexNumber)
     : null
-
-  const pokemonByName =
-    !pokemonByDex && normalizedEvolutionName
-      ? pokemons.value.find((item) => {
-          const displayName = normalizeToken(getDisplayName(item))
-          const baseName = normalizeToken(item?.name || '')
-          return displayName === normalizedEvolutionName || baseName === normalizedEvolutionName
-        })
+  const pokemonByNameMatch =
+    !pokemonByDexMatch && normalizedEvolutionName
+      ? pokemonByNormalizedName.value.get(normalizedEvolutionName)
       : null
 
-  const targetPokemon = pokemonByDex || pokemonByName
+  const targetPokemon = pokemonByDexMatch || pokemonByNameMatch
   if (targetPokemon) {
     openDetails(targetPokemon)
   }
@@ -663,6 +688,25 @@ const getDescriptionText = (pokemon) => {
   const text = String(pokemon?.description || '').trim()
   return text || DEFAULT_DESCRIPTION_TEXT
 }
+
+const selectedSecondaryTypes = computed(() => getSecondaryTypes(selectedPokemon.value))
+const selectedAbilityList = computed(() => getAbilityList(selectedPokemon.value))
+const selectedBaseStats = computed(() => getBaseStats(selectedPokemon.value))
+const selectedBaseStatEntries = computed(() => getBaseStatEntries(selectedPokemon.value))
+const selectedMetaFlags = computed(() => getMetaFlags(selectedPokemon.value))
+const selectedRegionName = computed(() => getRegionName(selectedPokemon.value))
+const selectedDescriptionText = computed(() => getDescriptionText(selectedPokemon.value))
+const selectedPrimaryType = computed(() => getPrimaryType(selectedPokemon.value))
+const selectedDetailTypeColor = computed(
+  () => TYPE_COLORS[selectedPrimaryType.value] || '#8aa9d8'
+)
+const selectedEggGroupLabel = computed(() => getEggGroupLabel(selectedPokemon.value))
+const selectedCaptureRateLabel = computed(() => getCaptureRate(selectedPokemon.value))
+const selectedBaseExperience = computed(() => {
+  const value = Number(selectedPokemon.value?.baseExperience)
+  return Number.isFinite(value) ? value : '-'
+})
+const hasSelectedAbilities = computed(() => selectedAbilityList.value.length > 0)
 
 const createFavoriteAudio = (src) => {
   if (typeof Audio === 'undefined') return null
@@ -827,7 +871,13 @@ const getRegionImageUrl = (pokemon) => {
     return apiImageUrl
   }
 
-  const regionLabel = getRegionName(pokemon)
+  const regionName = getRegionName(pokemon)
+  const regionKey = normalizeToken(regionName)
+  if (regionFallbackImageCache.has(regionKey)) {
+    return regionFallbackImageCache.get(regionKey)
+  }
+
+  const regionLabel = regionName
     .toUpperCase()
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -849,7 +899,9 @@ const getRegionImageUrl = (pokemon) => {
       <text x="480" y="320" text-anchor="middle" fill="#111111" font-size="94" font-family="Poppins, Segoe UI, Arial, sans-serif" font-weight="900" letter-spacing="2">${regionLabel}</text>
     </svg>
   `
-  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`
+  const dataUrl = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`
+  regionFallbackImageCache.set(regionKey, dataUrl)
+  return dataUrl
 }
 
 const setFavoriteLaunchVector = (triggerElement) => {
@@ -1453,12 +1505,12 @@ watch(
                 </div>
 
                 <div class="detail-type-row">
-                  <span class="detail-type-pill" :style="{ '--type-pill-bg': getCardColor(selectedPokemon) }">
-                    {{ getTypeLabel(getPrimaryType(selectedPokemon)) }}
+                  <span class="detail-type-pill" :style="{ '--type-pill-bg': selectedDetailTypeColor }">
+                    {{ getTypeLabel(selectedPrimaryType) }}
                   </span>
 
                   <span
-                    v-for="type in getSecondaryTypes(selectedPokemon)"
+                    v-for="type in selectedSecondaryTypes"
                     :key="`${selectedPokemon._id}-type-${type}`"
                     class="detail-type-chip"
                     :style="{ '--type-pill-bg': TYPE_COLORS[type] || '#8aa9d8' }"
@@ -1478,13 +1530,7 @@ watch(
                   </div>
                   <div>
                     <dt>EXP. BASE</dt>
-                    <dd>
-                      {{
-                        Number.isFinite(Number(selectedPokemon?.baseExperience))
-                          ? Number(selectedPokemon.baseExperience)
-                          : '-'
-                      }}
-                    </dd>
+                    <dd>{{ selectedBaseExperience }}</dd>
                   </div>
                   <div>
                     <dt>GENRE</dt>
@@ -1504,18 +1550,18 @@ watch(
 
                 <ul class="detail-ability-list">
                   <li
-                    v-for="ability in getAbilityList(selectedPokemon)"
+                    v-for="ability in selectedAbilityList"
                     :key="`${selectedPokemon._id}-ability-${ability.name}`"
                   >
                     <span>{{ ability.name }}</span>
                     <small v-if="ability.isHidden">CACHE</small>
                   </li>
-                  <li v-if="!getAbilityList(selectedPokemon).length" class="detail-muted">-</li>
+                  <li v-if="!hasSelectedAbilities" class="detail-muted">-</li>
                 </ul>
 
                 <div class="detail-subline">
                   <span>GROUPES OEUF</span>
-                  <strong>{{ getEggGroupLabel(selectedPokemon) }}</strong>
+                  <strong>{{ selectedEggGroupLabel }}</strong>
                 </div>
               </article>
 
@@ -1526,12 +1572,12 @@ watch(
               >
                 <div class="detail-card-head">
                   <h4>STATS</h4>
-                  <span class="detail-total-tag">TOTAL {{ getBaseStats(selectedPokemon).total }}</span>
+                  <span class="detail-total-tag">TOTAL {{ selectedBaseStats.total }}</span>
                 </div>
 
                 <ul class="detail-stat-list">
                   <li
-                    v-for="stat in getBaseStatEntries(selectedPokemon)"
+                    v-for="stat in selectedBaseStatEntries"
                     :key="`${selectedPokemon._id}-stat-${stat.key}`"
                   >
                     <span class="detail-stat-label">{{ stat.label }}</span>
@@ -1552,11 +1598,11 @@ watch(
                   <img
                     class="region-map-image"
                     :src="getRegionImageUrl(selectedPokemon)"
-                    :alt="`Carte ${getRegionName(selectedPokemon)}`"
+                    :alt="`Carte ${selectedRegionName}`"
                     loading="lazy"
                     decoding="async"
                   />
-                  <span class="region-name">{{ getRegionName(selectedPokemon).toUpperCase() }}</span>
+                  <span class="region-name">{{ selectedRegionName.toUpperCase() }}</span>
                 </article>
 
                 <dl class="detail-kv-grid compact">
@@ -1574,12 +1620,12 @@ watch(
                   </div>
                   <div>
                     <dt>CAPTURE</dt>
-                    <dd>{{ getCaptureRate(selectedPokemon) }}</dd>
+                    <dd>{{ selectedCaptureRateLabel }}</dd>
                   </div>
                 </dl>
 
                 <div class="detail-flag-row">
-                  <span v-for="flag in getMetaFlags(selectedPokemon)" :key="`${selectedPokemon._id}-flag-${flag}`">
+                  <span v-for="flag in selectedMetaFlags" :key="`${selectedPokemon._id}-flag-${flag}`">
                     {{ flag }}
                   </span>
                 </div>
@@ -1636,7 +1682,7 @@ watch(
                   </button>
                 </div>
                 <p>
-                  {{ getDescriptionText(selectedPokemon) }}
+                  {{ selectedDescriptionText }}
                 </p>
               </section>
             </div>

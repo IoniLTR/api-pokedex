@@ -101,6 +101,7 @@ const loading = ref(true)
 const error = ref(null)
 const evolutionFrNameCache = new Map()
 const evolutionSequenceCache = new Map()
+const regionFallbackImageCache = new Map()
 let activeDescriptionUtterance = null
 let favoriteCaptureSfx = null
 let favoriteReleaseSfx = null
@@ -121,6 +122,11 @@ const normalizeToken = (value) =>
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toUpperCase()
+
+const getCanonicalType = (type) => {
+  const normalized = normalizeToken(type)
+  return TYPE_ALIASES[normalized] || normalized
+}
 
 const isAuthenticated = computed(() => Boolean(authToken.value))
 const username = computed(() => String(authUser.value?.username || '').trim().toUpperCase() || 'NOM')
@@ -155,8 +161,7 @@ const formatHeight = (value) => {
 }
 const getPrimaryType = (pokemon) => {
   const firstType = Array.isArray(pokemon?.types) ? pokemon.types[0] : ''
-  const normalized = normalizeToken(firstType)
-  return TYPE_ALIASES[normalized] || normalized
+  return getCanonicalType(firstType)
 }
 const getCardColor = (pokemon) => TYPE_COLORS[getPrimaryType(pokemon)] || '#47586b'
 const getTypeLabel = (type) => TYPE_LABELS_FR[type] || type || 'INCONNU'
@@ -168,10 +173,7 @@ const formatSlugLabel = (value) => {
 }
 const getSecondaryTypes = (pokemon) => {
   const types = Array.isArray(pokemon?.types) ? pokemon.types : []
-  return types.slice(1).map((type) => {
-    const normalized = normalizeToken(type)
-    return TYPE_ALIASES[normalized] || normalized
-  })
+  return types.slice(1).map((type) => getCanonicalType(type))
 }
 const getAbilityList = (pokemon) => {
   const abilities = Array.isArray(pokemon?.abilities) ? pokemon.abilities : []
@@ -208,6 +210,20 @@ const getCaptureRate = (pokemon) => {
   const value = Number(pokemon?.captureRate)
   return Number.isFinite(value) ? `${value}/255` : '-'
 }
+const selectedSecondaryTypes = computed(() => getSecondaryTypes(selectedPokemon.value))
+const selectedAbilityList = computed(() => getAbilityList(selectedPokemon.value))
+const selectedBaseStats = computed(() => getBaseStats(selectedPokemon.value))
+const selectedBaseStatEntries = computed(() => getBaseStatEntries(selectedPokemon.value))
+const selectedMetaFlags = computed(() => getMetaFlags(selectedPokemon.value))
+const selectedRegionName = computed(() => getRegionName(selectedPokemon.value))
+const selectedDescriptionText = computed(() => getDescriptionText(selectedPokemon.value))
+const selectedPrimaryType = computed(() => getPrimaryType(selectedPokemon.value))
+const selectedDetailTypeColor = computed(
+  () => TYPE_COLORS[selectedPrimaryType.value] || '#8aa9d8'
+)
+const selectedEggGroupLabel = computed(() => getEggGroupLabel(selectedPokemon.value))
+const selectedCaptureRateLabel = computed(() => getCaptureRate(selectedPokemon.value))
+const hasSelectedAbilities = computed(() => selectedAbilityList.value.length > 0)
 const getBaseStats = (pokemon) => {
   const base = pokemon?.baseStats && typeof pokemon.baseStats === 'object' ? pokemon.baseStats : {}
   const toSafe = (key) => {
@@ -240,6 +256,36 @@ const getStatPercent = (value) => {
   if (!Number.isFinite(num) || num <= 0) return 0
   return Math.max(0, Math.min(100, (num / MAX_BASE_STAT_VISUAL) * 100))
 }
+const pokemonById = computed(() => {
+  const map = new Map()
+  for (const pokemon of pokemons.value) {
+    const id = String(pokemon?._id || '').trim()
+    if (!id || map.has(id)) continue
+    map.set(id, pokemon)
+  }
+  return map
+})
+
+const pokemonByDex = computed(() => {
+  const map = new Map()
+  for (const pokemon of pokemons.value) {
+    const dexNumber = getPokedexNumber(pokemon)
+    if (!Number.isFinite(dexNumber) || map.has(dexNumber)) continue
+    map.set(dexNumber, pokemon)
+  }
+  return map
+})
+
+const pokemonByNormalizedName = computed(() => {
+  const map = new Map()
+  for (const pokemon of pokemons.value) {
+    const displayName = normalizeToken(getDisplayName(pokemon))
+    const baseName = normalizeToken(pokemon?.name || '')
+    if (displayName && !map.has(displayName)) map.set(displayName, pokemon)
+    if (baseName && !map.has(baseName)) map.set(baseName, pokemon)
+  }
+  return map
+})
 const getCryUrl = (pokemon) => String(pokemon?.cryUrl || '').trim()
 const hasCry = (pokemon) => Boolean(getCryUrl(pokemon))
 const supportsDescriptionSpeech = () =>
@@ -522,19 +568,15 @@ const openEvolutionDetails = (evolution) => {
   const dexNumber = Number(evolution?.dexNumber)
   const normalizedEvolutionName = normalizeToken(evolution?.name || '')
 
-  const pokemonByDex = Number.isFinite(dexNumber)
-    ? pokemons.value.find((item) => getPokedexNumber(item) === dexNumber)
+  const pokemonByDexMatch = Number.isFinite(dexNumber)
+    ? pokemonByDex.value.get(dexNumber)
     : null
-  const pokemonByName =
-    !pokemonByDex && normalizedEvolutionName
-      ? pokemons.value.find((item) => {
-          const displayName = normalizeToken(getDisplayName(item))
-          const baseName = normalizeToken(item?.name || '')
-          return displayName === normalizedEvolutionName || baseName === normalizedEvolutionName
-        })
+  const pokemonByNameMatch =
+    !pokemonByDexMatch && normalizedEvolutionName
+      ? pokemonByNormalizedName.value.get(normalizedEvolutionName)
       : null
 
-  const targetPokemon = pokemonByDex || pokemonByName
+  const targetPokemon = pokemonByDexMatch || pokemonByNameMatch
   if (targetPokemon) openDetails(targetPokemon)
 }
 
@@ -542,7 +584,13 @@ const getRegionImageUrl = (pokemon) => {
   const apiImageUrl = String(pokemon?.regions?.[0]?.regionImageUrl || '').trim()
   if (apiImageUrl) return apiImageUrl
 
-  const regionLabel = getRegionName(pokemon)
+  const regionName = getRegionName(pokemon)
+  const regionKey = normalizeToken(regionName)
+  if (regionFallbackImageCache.has(regionKey)) {
+    return regionFallbackImageCache.get(regionKey)
+  }
+
+  const regionLabel = regionName
     .toUpperCase()
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -563,13 +611,16 @@ const getRegionImageUrl = (pokemon) => {
       <text x="480" y="320" text-anchor="middle" fill="#111111" font-size="94" font-family="Poppins, Segoe UI, Arial, sans-serif" font-weight="900" letter-spacing="2">${regionLabel}</text>
     </svg>
   `
-  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`
+  const dataUrl = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`
+  regionFallbackImageCache.set(regionKey, dataUrl)
+  return dataUrl
 }
 
 const favoritePokemons = computed(() => {
   if (!favoriteIds.value.size || !pokemons.value.length) return []
-  const byId = new Map(pokemons.value.map((pokemon) => [String(pokemon?._id || ''), pokemon]))
-  return [...favoriteIds.value].map((id) => byId.get(String(id))).filter(Boolean)
+  return [...favoriteIds.value]
+    .map((id) => pokemonById.value.get(String(id)))
+    .filter(Boolean)
 })
 
 const syncAuthState = async () => {
@@ -1185,11 +1236,11 @@ watch(
                 <h4>PROFIL</h4>
 
                 <div class="detail-type-row">
-                  <span class="detail-type-pill" :style="{ '--type-pill-bg': getCardColor(selectedPokemon) }">
-                    {{ getTypeLabel(getPrimaryType(selectedPokemon)) }}
+                  <span class="detail-type-pill" :style="{ '--type-pill-bg': selectedDetailTypeColor }">
+                    {{ getTypeLabel(selectedPrimaryType) }}
                   </span>
                   <span
-                    v-for="type in getSecondaryTypes(selectedPokemon)"
+                    v-for="type in selectedSecondaryTypes"
                     :key="`${selectedPokemon._id}-type-${type}`"
                     class="detail-type-chip"
                     :style="{ '--type-pill-bg': TYPE_COLORS[type] || '#8aa9d8' }"
@@ -1227,18 +1278,18 @@ watch(
 
                 <ul class="detail-ability-list">
                   <li
-                    v-for="ability in getAbilityList(selectedPokemon)"
+                    v-for="ability in selectedAbilityList"
                     :key="`${selectedPokemon._id}-ability-${ability.name}`"
                   >
                     <span>{{ ability.name }}</span>
                     <small v-if="ability.isHidden">CACHE</small>
                   </li>
-                  <li v-if="!getAbilityList(selectedPokemon).length" class="detail-muted">-</li>
+                  <li v-if="!hasSelectedAbilities" class="detail-muted">-</li>
                 </ul>
 
                 <div class="detail-subline">
                   <span>GROUPES OEUF</span>
-                  <strong>{{ getEggGroupLabel(selectedPokemon) }}</strong>
+                  <strong>{{ selectedEggGroupLabel }}</strong>
                 </div>
               </article>
 
@@ -1249,12 +1300,12 @@ watch(
               >
                 <div class="detail-card-head">
                   <h4>STATS</h4>
-                  <span class="detail-total-tag">TOTAL {{ getBaseStats(selectedPokemon).total }}</span>
+                  <span class="detail-total-tag">TOTAL {{ selectedBaseStats.total }}</span>
                 </div>
 
                 <ul class="detail-stat-list">
                   <li
-                    v-for="stat in getBaseStatEntries(selectedPokemon)"
+                    v-for="stat in selectedBaseStatEntries"
                     :key="`${selectedPokemon._id}-stat-${stat.key}`"
                   >
                     <span class="detail-stat-label">{{ stat.label }}</span>
@@ -1273,11 +1324,11 @@ watch(
                   <img
                     class="region-map-image"
                     :src="getRegionImageUrl(selectedPokemon)"
-                    :alt="`Carte ${getRegionName(selectedPokemon)}`"
+                    :alt="`Carte ${selectedRegionName}`"
                     loading="lazy"
                     decoding="async"
                   />
-                  <span class="region-name">{{ getRegionName(selectedPokemon).toUpperCase() }}</span>
+                  <span class="region-name">{{ selectedRegionName.toUpperCase() }}</span>
                 </article>
 
                 <dl class="detail-kv-grid compact">
@@ -1295,12 +1346,12 @@ watch(
                   </div>
                   <div>
                     <dt>CAPTURE</dt>
-                    <dd>{{ getCaptureRate(selectedPokemon) }}</dd>
+                    <dd>{{ selectedCaptureRateLabel }}</dd>
                   </div>
                 </dl>
 
                 <div class="detail-flag-row">
-                  <span v-for="flag in getMetaFlags(selectedPokemon)" :key="`${selectedPokemon._id}-flag-${flag}`">
+                  <span v-for="flag in selectedMetaFlags" :key="`${selectedPokemon._id}-flag-${flag}`">
                     {{ flag }}
                   </span>
                 </div>
@@ -1353,7 +1404,7 @@ watch(
                     {{ isDescriptionPlaying ? 'STOP AUDIO' : 'AUDIO' }}
                   </button>
                 </div>
-                <p>{{ getDescriptionText(selectedPokemon) }}</p>
+                <p>{{ selectedDescriptionText }}</p>
               </article>
             </div>
           </div>
@@ -1485,6 +1536,8 @@ watch(
   background: var(--card-bg);
   overflow: hidden;
   box-shadow: 0 8px 18px rgba(48, 78, 95, 0.2);
+  content-visibility: auto;
+  contain-intrinsic-size: 250px;
   cursor: pointer;
 }
 
